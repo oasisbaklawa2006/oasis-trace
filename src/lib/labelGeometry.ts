@@ -24,8 +24,19 @@ export const QUIET_ZONE_MM = {
   QR: 2.0,
 };
 
+/** Hard floor — never accept a quiet zone smaller than this (scanners fail). */
+export const MIN_QUIET_ZONE_MM = 1.5;
+
 /** Safe printable area inset (mm) inside the label edge. */
 export const SAFE_AREA_MM = 2;
+
+/** Minimum readable CODE128 module width (mm) at 203 DPI. Below this scanners fail. */
+export const MIN_MODULE_MM = 0.20;
+
+/** Minimum readable QR module side (mm) — anything below ≈0.4mm becomes micro-QR. */
+export const MIN_QR_MODULE_MM = 0.4;
+/** Minimum overall QR side (mm) for hand scanners. */
+export const MIN_QR_SIZE_MM = 12;
 
 /** Recommended barcode height (mm) ≈ 15% of barcode width, clamped to readable range. */
 export function recommendedBarcodeHeightMm(widthMm: number): number {
@@ -35,7 +46,7 @@ export function recommendedBarcodeHeightMm(widthMm: number): number {
 /** Recommended QR side (mm) — clamped 12–32 mm and ≤40% of shorter label side. */
 export function recommendedQrSizeMm(labelWmm: number, labelHmm: number): number {
   const shortest = Math.min(labelWmm, labelHmm);
-  return Math.max(12, Math.min(32, shortest * 0.4));
+  return Math.max(MIN_QR_SIZE_MM, Math.min(32, shortest * 0.4));
 }
 
 /** Module width (mm) for CODE128 — guarantees fit within available width incl. quiet zones. */
@@ -43,10 +54,20 @@ export function code128ModuleMm(valueLength: number, availableWmm: number): numb
   // CODE128 character ≈ 11 modules + 13 modules start/stop/check overhead.
   const modules = valueLength * 11 + 35;
   const usable = Math.max(10, availableWmm - QUIET_ZONE_MM.CODE128 * 2);
-  return Math.max(0.18, Math.min(0.5, usable / modules));
+  return Math.max(MIN_MODULE_MM * 0.9, Math.min(0.5, usable / modules));
 }
 
-/** Returns true if a barcode of given value would overflow the available width. */
-export function wouldOverflow(valueLength: number, availableWmm: number, minModuleMm = 0.2): boolean {
+/** Returns true if a barcode of given value would overflow / become unreadable. */
+export function wouldOverflow(valueLength: number, availableWmm: number, minModuleMm = MIN_MODULE_MM): boolean {
   return code128ModuleMm(valueLength, availableWmm) < minModuleMm;
+}
+
+/** Returns true if a QR of given (size, content length) would render below readable density. */
+export function qrTooDense(contentLength: number, sizeMm: number): boolean {
+  // Rough heuristic: each ≈25 chars adds one QR version (4 modules per side).
+  // Version 1 = 21 modules. Density (mm per module) = sizeMm / sideModules.
+  const versions = Math.ceil(Math.max(1, contentLength) / 25);
+  const sideModules = 21 + (versions - 1) * 4;
+  const moduleMm = sizeMm / sideModules;
+  return moduleMm < MIN_QR_MODULE_MM || sizeMm < MIN_QR_SIZE_MM;
 }
