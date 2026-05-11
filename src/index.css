@@ -2,104 +2,117 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
-All colors MUST be HSL.
-*/
+/* OASIS LABEL STUDIO — luxury industrial OS
+   White & soft grey base, deep teal primary, antique gold accent.
+   All colors in HSL. */
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    --background: 210 20% 98%;
+    --foreground: 200 25% 12%;
+
+    --surface: 0 0% 100%;
+    --surface-muted: 210 16% 95%;
 
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card-foreground: 200 25% 12%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    --popover-foreground: 200 25% 12%;
 
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
+    /* Deep teal */
+    --primary: 188 78% 22%;
+    --primary-foreground: 40 30% 96%;
+    --primary-glow: 186 65% 38%;
 
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 200 18% 94%;
+    --secondary-foreground: 200 25% 18%;
 
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --muted: 210 16% 94%;
+    --muted-foreground: 210 10% 42%;
 
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    /* Antique gold */
+    --accent: 40 55% 52%;
+    --accent-foreground: 200 30% 12%;
+    --accent-soft: 42 60% 92%;
 
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
+    --success: 152 55% 35%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 30 30% 12%;
+    --destructive: 0 72% 48%;
+    --destructive-foreground: 0 0% 100%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    --border: 210 18% 88%;
+    --input: 210 18% 88%;
+    --ring: 188 78% 22%;
 
-    --radius: 0.5rem;
+    --radius: 0.875rem;
 
-    --sidebar-background: 0 0% 98%;
+    --gradient-primary: linear-gradient(135deg, hsl(188 78% 22%), hsl(186 65% 38%));
+    --gradient-gold: linear-gradient(135deg, hsl(40 55% 52%), hsl(38 70% 64%));
+    --gradient-surface: linear-gradient(180deg, hsl(0 0% 100%), hsl(210 18% 96%));
 
-    --sidebar-foreground: 240 5.3% 26.1%;
+    --shadow-soft: 0 1px 2px hsl(200 25% 12% / 0.04), 0 4px 16px hsl(200 25% 12% / 0.05);
+    --shadow-elevated: 0 8px 30px -8px hsl(188 78% 22% / 0.18);
+    --shadow-gold: 0 6px 24px -8px hsl(40 55% 52% / 0.45);
 
-    --sidebar-primary: 240 5.9% 10%;
-
-    --sidebar-primary-foreground: 0 0% 98%;
-
-    --sidebar-accent: 240 4.8% 95.9%;
-
-    --sidebar-accent-foreground: 240 5.9% 10%;
-
-    --sidebar-border: 220 13% 91%;
-
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --sidebar-background: 200 30% 11%;
+    --sidebar-foreground: 200 12% 80%;
+    --sidebar-primary: 40 55% 52%;
+    --sidebar-primary-foreground: 200 30% 11%;
+    --sidebar-accent: 200 25% 16%;
+    --sidebar-accent-foreground: 40 30% 96%;
+    --sidebar-border: 200 25% 18%;
+    --sidebar-ring: 40 55% 52%;
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --background: 200 30% 8%;
+    --foreground: 40 20% 94%;
+    --surface: 200 30% 11%;
+    --surface-muted: 200 25% 14%;
+    --card: 200 30% 11%;
+    --card-foreground: 40 20% 94%;
+    --popover: 200 30% 11%;
+    --popover-foreground: 40 20% 94%;
+    --primary: 186 70% 48%;
+    --primary-foreground: 200 30% 8%;
+    --primary-glow: 186 80% 60%;
+    --secondary: 200 25% 16%;
+    --secondary-foreground: 40 20% 94%;
+    --muted: 200 25% 16%;
+    --muted-foreground: 200 12% 62%;
+    --accent: 40 60% 58%;
+    --accent-foreground: 200 30% 8%;
+    --accent-soft: 200 25% 16%;
+    --border: 200 25% 18%;
+    --input: 200 25% 18%;
+    --ring: 186 70% 48%;
   }
+
+  * { @apply border-border; }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "ss01", "cv11";
+  }
+  html { font-family: ui-sans-serif, system-ui, -apple-system, "SF Pro Display", "Inter", sans-serif; }
 }
 
-@layer base {
-  * {
-    @apply border-border;
+@layer components {
+  .ols-card {
+    @apply rounded-2xl border bg-card shadow-[var(--shadow-soft)];
   }
-
-  body {
-    @apply bg-background text-foreground;
+  .ols-card-elev {
+    @apply rounded-2xl border bg-card shadow-[var(--shadow-elevated)];
+  }
+  .ols-chip {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium;
+  }
+  .ols-stat-num {
+    @apply text-3xl font-semibold tracking-tight text-foreground;
+  }
+  .ols-section-title {
+    @apply text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground;
   }
 }
