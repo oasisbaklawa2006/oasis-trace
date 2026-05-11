@@ -35,14 +35,16 @@ export default function AppShell() {
   const [mode, setMode] = useState<"live" | "demo" | "unknown">("unknown");
   const [, setModeError] = useState<string | undefined>();
   const [online, setOnline] = useState(true);
+  const [pendingQueue, setPendingQueue] = useState(0);
   const { session } = useAuthSession();
   const location = useLocation();
   useEffect(() => setOpen(false), [location.pathname]);
   useEffect(() => {
     const off = subscribeMode((m, err) => { setMode(m); setModeError(err); });
     const offOnline = subscribeOnline(setOnline);
+    const offQueue = subscribeQueue(setPendingQueue);
     probeLiveMode();
-    return () => { off(); offOnline(); };
+    return () => { off(); offOnline(); offQueue(); };
   }, []);
 
   const grouped = NAV.reduce<Record<string, typeof NAV>>((acc, item) => {
@@ -134,8 +136,15 @@ export default function AppShell() {
 
       <main className="lg:pl-72">
         {!online && (
-          <div className="border-b bg-destructive/15 px-6 py-2 text-xs font-semibold text-destructive no-print">
-            Offline — actions will retry when the connection returns.
+          <div className="border-b bg-destructive/15 px-6 py-2 text-xs font-semibold text-destructive no-print flex items-center justify-between gap-4">
+            <span>Offline mode — actions are queued and will sync when the connection returns.</span>
+            {pendingQueue > 0 && <span className="rounded-full bg-destructive/30 px-2 py-0.5 text-[10px]">{pendingQueue} queued</span>}
+          </div>
+        )}
+        {online && pendingQueue > 0 && (
+          <div className="border-b bg-warning/15 px-6 py-2 text-xs font-semibold text-warning-foreground no-print flex items-center justify-between gap-4">
+            <span>{pendingQueue} action(s) waiting to sync to Supabase.</span>
+            <button onClick={() => flushQueue()} className="rounded-full bg-warning/30 px-2 py-0.5 text-[10px] hover:bg-warning/40">Retry now</button>
           </div>
         )}
         {!supabaseConfigured && (
