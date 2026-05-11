@@ -43,14 +43,20 @@ export default function FinancePI() {
         status: "pending",
       });
       setActive(pi);
+      // ensure recent PIs list shows it immediately
+      setPis(prev => [pi, ...prev]);
     }
     const dup = piCartons.find(p => p.pi_id === pi.id && p.carton_id === c.id);
     if (dup) { toast.error("Carton already on this PI"); setScan(""); return; }
-    await insertRow("ols_finance_pi_cartons", { pi_id: pi.id, carton_id: c.id });
+    const link = await insertRow<any>("ols_finance_pi_cartons", { pi_id: pi.id, carton_id: c.id });
     await updateRow("ols_cartons", c.id, { status: "finance_received" });
+    // Optimistic local updates so the counter reflects reality immediately,
+    // even before the next reload completes.
+    setPiCartons(prev => [...prev, link]);
+    setCartons(prev => prev.map(x => x.id === c.id ? { ...x, status: "finance_received" } : x));
     setScan("");
-    await reload();
     toast.success(`Carton ${c.carton_no} added to PI ${pi.pi_no}`);
+    await reload();
   }
 
   async function clearPI() {
