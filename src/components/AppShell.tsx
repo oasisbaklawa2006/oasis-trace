@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { supabaseConfigured } from "@/lib/supabase";
 import { probeLiveMode, subscribeMode, subscribeOnline } from "@/lib/data";
+import { subscribeQueue, flush as flushQueue } from "@/lib/offlineQueue";
 import { signOut, useAuthSession } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
