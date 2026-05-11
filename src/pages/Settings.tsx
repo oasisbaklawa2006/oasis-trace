@@ -57,6 +57,38 @@ export default function Settings() {
             <Button variant="outline" className="w-full" onClick={() => { demo.reset(); toast.success("Demo data reset"); setTimeout(() => location.reload(), 500); }}>Reset demo data</Button>
           </div>
           <p className="mt-4 text-[11px] text-muted-foreground">All app data lives in tables prefixed <code>ols_</code>. Existing Oasis Central tables are never touched.</p>
+
+          {/* Scan audio + haptics */}
+          <div className="mt-5 rounded-xl border bg-surface p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h4 className="text-sm font-semibold">Scan feedback</h4>
+              <Button
+                variant={muted ? "destructive" : "outline"} size="sm"
+                onClick={() => { const next = !muted; setMuted(next); setMutedState(next); }}
+                title="Emergency mute-all"
+              >
+                {muted ? <><VolumeX size={14} className="mr-1" /> Muted</> : <><Volume2 size={14} className="mr-1" /> On</>}
+              </Button>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">Beeps + vibration</span>
+              <Switch checked={enabled} onCheckedChange={(v) => { setFeedbackEnabled(v); setEnabledState(v); }} />
+            </div>
+            <div className="mt-3">
+              <div className="mb-1 flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">Volume</span>
+                <span className="font-mono">{vol}%</span>
+              </div>
+              <Slider value={[vol]} min={0} max={100} step={5}
+                onValueChange={([v]) => { setVol(v); setVolume(v / 100); }} />
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <Button size="sm" variant="outline" onClick={() => feedback("ok")}>Test OK</Button>
+              <Button size="sm" variant="outline" onClick={() => feedback("dup")}>Test Duplicate</Button>
+              <Button size="sm" variant="outline" onClick={() => feedback("blocked")}>Test Blocked</Button>
+              <Button size="sm" variant="outline" onClick={() => feedback("approval")}>Test Approval</Button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
