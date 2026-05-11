@@ -8,6 +8,7 @@ import { num } from "@/lib/numbering";
 import { Printer, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { Barcode } from "@/components/Barcode";
+import { PrintSheet } from "@/components/PrintSheet";
 import { StatusPill } from "@/components/StatusPill";
 
 export default function DPL() {
@@ -114,61 +115,97 @@ export default function DPL() {
           </div>
         </div>
 
-        <div className="ols-card lg:col-span-2 p-6 print:shadow-none print:border-0" id="dpl-print">
+        <div className="lg:col-span-2" id="dpl-print">
           {!active ? (
-            <p className="py-12 text-center text-sm text-muted-foreground">Select or generate a DPL to view A4 print sheet.</p>
+            <div className="ols-card p-12 text-center text-sm text-muted-foreground">Select or generate a DPL to view A4 print sheet.</div>
           ) : (
-            <div>
-              <div className="flex items-start justify-between border-b pb-4">
+            <PrintSheet>
+              <header className="flex items-start justify-between border-b pb-4">
                 <div>
                   <p className="text-[10px] font-semibold tracking-[0.2em] text-muted-foreground">OASIS BAKLAWA</p>
                   <h2 className="text-xl font-semibold">Detailed Packing List</h2>
+                  <p className="text-[11px] text-muted-foreground">Carton-wise dispatch & finance bridge</p>
                 </div>
                 <div className="text-right text-xs">
                   <p>DPL <span className="font-mono">{active.dpl_no}</span></p>
                   <p>Order <span className="font-mono">{active.order_ref}</span></p>
                   <p>Date {new Date(active.created_at).toLocaleDateString()}</p>
                 </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3 py-3 text-xs">
+              </header>
+              <section className="grid grid-cols-2 gap-3 py-4 text-xs md:grid-cols-4">
                 <div><span className="text-muted-foreground">Customer</span><p className="font-medium">{active.customer_name}</p></div>
-                <div><span className="text-muted-foreground">Destination</span><p className="font-medium">{active.destination}</p></div>
-                <div><span className="text-muted-foreground">Transport</span><p className="font-medium">{active.transport_mode}</p></div>
+                <div><span className="text-muted-foreground">Destination</span><p className="font-medium">{active.destination || "—"}</p></div>
+                <div><span className="text-muted-foreground">Transport</span><p className="font-medium">{active.transport_mode || "—"}</p></div>
                 <div><span className="text-muted-foreground">Prepared</span><p className="font-medium">{new Date(active.prepared_at || active.created_at).toLocaleString()}</p></div>
-              </div>
+              </section>
 
-              <table className="w-full text-xs">
-                <thead className="bg-secondary text-left uppercase tracking-wider">
-                  <tr><th className="px-2 py-2">#</th><th className="px-2 py-2">Carton barcode</th><th className="px-2 py-2">SKU summary</th><th className="px-2 py-2 text-right">Qty</th><th className="px-2 py-2 text-right">Net kg</th><th className="px-2 py-2 text-right">Gross kg</th></tr>
-                </thead>
-                <tbody>
-                  {activeCartons.map((c, i) => {
-                    const sk = cartonSummary(c.id);
-                    return (
-                      <tr key={c.id} className="border-b align-top">
-                        <td className="px-2 py-2">{i + 1}</td>
-                        <td className="px-2 py-2">
-                          <p className="font-mono">{c.carton_no}</p>
-                          <div className="mt-1 max-w-[160px]"><Barcode value={c.carton_no} height={28} displayValue={false} /></div>
-                        </td>
-                        <td className="px-2 py-2">{sk.length === 0 ? "—" : sk.map(s => <div key={s.sku}>{s.name} <span className="text-muted-foreground">({s.sku})</span></div>)}</td>
-                        <td className="px-2 py-2 text-right">{sk.reduce((s, x) => s + x.qty, 0)}</td>
-                        <td className="px-2 py-2 text-right">{(c.net_weight || 0).toFixed(2)}</td>
-                        <td className="px-2 py-2 text-right">{(c.gross_weight || 0).toFixed(2)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-                <tfoot>
-                  <tr className="font-semibold">
-                    <td className="px-2 py-2" colSpan={3}>Totals · {active.total_cartons} cartons</td>
-                    <td className="px-2 py-2 text-right">—</td>
-                    <td className="px-2 py-2 text-right">{(active.total_net || 0).toFixed(2)}</td>
-                    <td className="px-2 py-2 text-right">{(active.total_gross || 0).toFixed(2)}</td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
+              <section>
+                <h3 className="ols-section-title mb-2">SKU Rollup</h3>
+                <table className="w-full text-xs">
+                  <thead className="bg-secondary text-left uppercase tracking-wider">
+                    <tr><th className="px-2 py-1.5">SKU</th><th className="px-2 py-1.5">Product</th><th className="px-2 py-1.5 text-right">Qty</th><th className="px-2 py-1.5 text-right">Net kg</th></tr>
+                  </thead>
+                  <tbody>
+                    {(() => {
+                      const roll: Record<string, { name: string; qty: number; net: number }> = {};
+                      for (const c of activeCartons) for (const s of cartonSummary(c.id)) {
+                        roll[s.sku] ||= { name: s.name, qty: 0, net: 0 };
+                        roll[s.sku].qty += s.qty; roll[s.sku].net += s.net;
+                      }
+                      return Object.entries(roll).map(([sku, v]) => (
+                        <tr key={sku} className="border-b">
+                          <td className="px-2 py-1.5 font-mono">{sku}</td>
+                          <td className="px-2 py-1.5">{v.name}</td>
+                          <td className="px-2 py-1.5 text-right">{v.qty}</td>
+                          <td className="px-2 py-1.5 text-right">{v.net.toFixed(2)}</td>
+                        </tr>
+                      ));
+                    })()}
+                  </tbody>
+                </table>
+              </section>
+
+              <section className="mt-5">
+                <h3 className="ols-section-title mb-2">Cartons</h3>
+                <table className="w-full text-xs">
+                  <thead className="bg-secondary text-left uppercase tracking-wider">
+                    <tr><th className="px-2 py-2">#</th><th className="px-2 py-2">Carton barcode</th><th className="px-2 py-2">SKU summary</th><th className="px-2 py-2 text-right">Qty</th><th className="px-2 py-2 text-right">Net kg</th><th className="px-2 py-2 text-right">Gross kg</th></tr>
+                  </thead>
+                  <tbody>
+                    {activeCartons.map((c, i) => {
+                      const sk = cartonSummary(c.id);
+                      return (
+                        <tr key={c.id} className="border-b align-top">
+                          <td className="px-2 py-2">{i + 1}</td>
+                          <td className="px-2 py-2">
+                            <p className="font-mono">{c.carton_no}</p>
+                            <div className="mt-1 max-w-[160px]"><Barcode value={c.carton_no} availableWidthMm={45} height={28} displayValue={false} /></div>
+                          </td>
+                          <td className="px-2 py-2">{sk.length === 0 ? "—" : sk.map(s => <div key={s.sku}>{s.name} <span className="text-muted-foreground">({s.sku})</span></div>)}</td>
+                          <td className="px-2 py-2 text-right">{sk.reduce((s, x) => s + x.qty, 0)}</td>
+                          <td className="px-2 py-2 text-right">{(c.net_weight || 0).toFixed(2)}</td>
+                          <td className="px-2 py-2 text-right">{(c.gross_weight || 0).toFixed(2)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className="font-semibold">
+                      <td className="px-2 py-2" colSpan={3}>Totals · {active.total_cartons} cartons</td>
+                      <td className="px-2 py-2 text-right">—</td>
+                      <td className="px-2 py-2 text-right">{(active.total_net || 0).toFixed(2)}</td>
+                      <td className="px-2 py-2 text-right">{(active.total_gross || 0).toFixed(2)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </section>
+
+              <footer className="mt-8 grid grid-cols-3 gap-4 border-t pt-6 text-[11px] text-muted-foreground">
+                <div>Prepared by<br /><span className="mt-6 block border-t border-dashed pt-1">________________</span></div>
+                <div>Verified by<br /><span className="mt-6 block border-t border-dashed pt-1">________________</span></div>
+                <div>Released by<br /><span className="mt-6 block border-t border-dashed pt-1">________________</span></div>
+              </footer>
+            </PrintSheet>
           )}
         </div>
       </div>
