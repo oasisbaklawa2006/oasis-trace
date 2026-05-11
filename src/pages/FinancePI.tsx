@@ -59,6 +59,25 @@ export default function FinancePI() {
     await updateRow("ols_finance_pi", active.id, { status: "cleared", cleared_at: new Date().toISOString(), invoice_ref: invoiceRef });
     const linked = piCartons.filter(p => p.pi_id === active.id).map(p => p.carton_id);
     for (const cid of linked) await updateRow("ols_cartons", cid, { status: "invoiced" });
+
+    // Build SKU-wise simplified lines for customer view and persist them.
+    const linkedCtns = cartons.filter(c => linked.includes(c.id));
+    const bySku: Record<string, { name: string; qty: number; net: number; gross: number }> = {};
+    for (const c of linkedCtns) {
+      const items = contents.filter(x => x.carton_id === c.id);
+      for (const it of items) {
+        const lbl = labels.find(l => l.id === it.production_label_id);
+        const sku = lbl?.metadata?.sku || it.manual_sku || "—";
+        const name = lbl?.metadata?.product_name || "—";
+        bySku[sku] ||= { name, qty: 0, net: 0, gross: 0 };
+        bySku[sku].qty += 1;
+        bySku[sku].net += lbl?.net_weight || 0;
+        bySku[sku].gross += lbl?.gross_weight || 0;
+      }
+    }
+    for (const [sku, v] of Object.entries(bySku)) {
+      await insertRow("ols_finance_pi_lines", { pi_id: active.id, sku, product_name: v.name, quantity: v.qty, net_weight: v.net, gross_weight: v.gross });
+    }
     toast.success("PI cleared — shipping labels can now be generated");
     setActive(null); setInvoiceRef("");
     await reload();
