@@ -1,21 +1,26 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { REPORT_BUILDERS, type ReportKey } from "@/lib/reports";
+import { REPORT_BUILDERS, defaultRange, HARD_ROW_CAP, type ReportKey } from "@/lib/reports";
 import type { Report } from "@/lib/exporters";
-import { downloadCSV, exportPDF, printA4 } from "@/lib/exporters";
-import { Download, Printer, FileText, BarChart3 } from "lucide-react";
+import { downloadCSV, exportPDF, printA4, type Watermark } from "@/lib/exporters";
+import { Download, Printer, FileText, BarChart3, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "@/components/EmptyState";
+
+const ymd = (d: Date) => d.toISOString().slice(0, 10);
 
 export default function Reports() {
   const [key, setKey] = useState<ReportKey>("dispatch");
   const [term, setTerm] = useState("");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
+  // Default last 7 days — prevents accidental full-table scans on launch.
+  const initial = defaultRange();
+  const [from, setFrom] = useState(ymd(initial.from!));
+  const [to, setTo] = useState(ymd(initial.to!));
+  const [watermark, setWatermark] = useState<Watermark | "NONE">("NONE");
   const [report, setReport] = useState<Report | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -24,21 +29,29 @@ export default function Reports() {
   async function generate() {
     setBusy(true);
     try {
-      const range = { from: from ? new Date(from) : undefined, to: to ? new Date(to) : undefined };
+      const range = {
+        from: from ? new Date(from) : undefined,
+        to: to ? new Date(to) : undefined,
+      };
       const r = await (cfg as any).build(term, range);
       setReport(r);
-      if (r.rows.length === 0) toast.info("Report generated · no rows match the filters");
-      else toast.success(`${r.rows.length} row(s)`);
+      if (r.meta?.truncated) {
+        toast.warning("Dataset too large", { description: `Showing ${r.meta.cap} of ${r.meta.total}. Narrow filters.` });
+      } else if (r.rows.length === 0) {
+        toast.info("Report generated · no rows match the filters");
+      } else {
+        toast.success(`${r.rows.length} row(s)`);
+      }
     } catch (e: any) { toast.error("Report failed", { description: e?.message }); }
     finally { setBusy(false); }
   }
 
-  // Auto-generate on first load
+  // Auto-run when switching report kind, but with the bounded default range.
   useEffect(() => { generate(); /* eslint-disable-next-line */ }, [key]);
 
   return (
     <div>
-      <PageHeader eyebrow="Operations" title="Audit Report Engine" description="Export-grade reports for batch traceability, carton movement, dispatch, gate clearance, reprints and finance discrepancies." />
+      <PageHeader eyebrow="Operations" title="Audit Report Engine" description="Bounded by default to the last 7 days. Hard cap of 5000 rows protects the browser; narrow filters for archival exports." />
 
       <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
         <aside className="ols-card p-4">
@@ -50,6 +63,9 @@ export default function Reports() {
               </button>
             ))}
           </div>
+          <p className="mt-4 text-[10px] text-muted-foreground">
+            Default window: last 7 days. Hard cap: {HARD_ROW_CAP.toLocaleString()} rows.
+          </p>
         </aside>
 
         <section className="ols-card p-5">
@@ -66,17 +82,46 @@ export default function Reports() {
                 <div><Label className="mb-1.5 block text-xs">To</Label><Input type="date" value={to} onChange={e => setTo(e.target.value)} /></div>
               </>
             )}
+            <div>
+              <Label className="mb-1.5 block text-xs">Watermark</Label>
+              <Select value={watermark} onValueChange={(v) => setWatermark(v as any)}>
+                <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="NONE">None</SelectItem>
+                  <SelectItem value="DRAFT">DRAFT</SelectItem>
+                  <SelectItem value="INTERNAL">INTERNAL</SelectItem>
+                  <SelectItem value="VERIFIED">VERIFIED</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <Button onClick={generate} disabled={busy} className="bg-gradient-primary text-primary-foreground">
               {busy ? "Generating…" : "Generate"}
             </Button>
             <div className="ml-auto flex gap-2">
               <Button variant="outline" size="sm" disabled={!report} onClick={() => report && downloadCSV(report)}><Download size={14} className="mr-1" /> CSV</Button>
-              <Button variant="outline" size="sm" disabled={!report} onClick={() => report && exportPDF(report)}><FileText size={14} className="mr-1" /> PDF</Button>
+              <Button variant="outline" size="sm" disabled={!report} onClick={() => report && exportPDF(report, { watermark: watermark === "NONE" ? undefined : watermark })}><FileText size={14} className="mr-1" /> PDF</Button>
               <Button variant="outline" size="sm" disabled={!report} onClick={printA4}><Printer size={14} className="mr-1" /> Print A4</Button>
             </div>
           </div>
 
-          <div className="mt-5 print-sheet">
+          {report?.meta?.truncated && (
+            <div className="mt-4 flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              <AlertTriangle size={14} className="mt-0.5" />
+              <div>
+                <p className="font-semibold">Dataset too large — narrow filters.</p>
+                <p className="opacity-80">Showing {report.meta.cap} of {report.meta.total} rows. Tighten the date range or search term for archival accuracy.</p>
+              </div>
+            </div>
+          )}
+
+          <div className="mt-5 print-sheet relative">
+            {watermark !== "NONE" && report && (
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center print:flex">
+                <span className="rotate-[-22deg] select-none text-[120px] font-bold uppercase tracking-widest text-destructive/10">
+                  {watermark}
+                </span>
+              </div>
+            )}
             {!report ? <EmptyState title="No report yet" description="Generate to preview." /> : (
               <>
                 <header className="mb-3 flex items-baseline justify-between gap-4">

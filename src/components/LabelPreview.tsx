@@ -1,9 +1,10 @@
 import { ReactNode, useMemo } from "react";
 import { Barcode } from "@/components/Barcode";
 import { QRCodeSVG } from "qrcode.react";
-import { mmToPx, recommendedQrSizeMm, SAFE_AREA_MM } from "@/lib/labelGeometry";
+import { mmToPx, qrTooDense, recommendedQrSizeMm, SAFE_AREA_MM, QUIET_ZONE_MM } from "@/lib/labelGeometry";
 import { cn } from "@/lib/utils";
 import type { Rotation } from "@/lib/printerCommands";
+import { AlertTriangle } from "lucide-react";
 
 export interface LabelPreviewProps {
   widthMm: number;
@@ -42,8 +43,10 @@ export function LabelPreview({
   const wPx = mmToPx(widthMm, scale * 2);
   const hPx = mmToPx(heightMm, scale * 2);
   const insetPx = mmToPx(SAFE_AREA_MM, scale * 2);
+  const quietPx = mmToPx(QUIET_ZONE_MM.CODE128, scale * 2);
   const qrSizeMm = qr ? recommendedQrSizeMm(widthMm, heightMm) : 0;
   const qrPx = mmToPx(qrSizeMm, scale * 2);
+  const qrDense = qr ? qrTooDense(qr.length, qrSizeMm) : false;
 
   const gridLines = useMemo(() => {
     if (!showGrid) return null;
@@ -68,10 +71,25 @@ export function LabelPreview({
       >
         {gridLines}
         {showSafeArea && (
-          <div
-            className="pointer-events-none absolute rounded-sm border border-dashed border-primary/30"
-            style={{ left: insetPx, top: insetPx, right: insetPx, bottom: insetPx }}
-          />
+          <>
+            <div
+              className="pointer-events-none absolute rounded-sm border border-dotted border-destructive/30"
+              style={{ left: 1, top: 1, right: 1, bottom: 1 }}
+              title="Printer head non-print zone"
+            />
+            <div
+              className="pointer-events-none absolute rounded-sm border border-dashed border-primary/30"
+              style={{ left: insetPx, top: insetPx, right: insetPx, bottom: insetPx }}
+              title="Safe content area"
+            />
+            {barcode && (
+              <div
+                className="pointer-events-none absolute border-l border-r border-success/20"
+                style={{ left: insetPx + quietPx, right: insetPx + quietPx, bottom: insetPx, height: Math.min(44, hPx * 0.32) + 4 }}
+                title="Barcode quiet zone"
+              />
+            )}
+          </>
         )}
         <div className="relative h-full w-full p-2.5" style={{ padding: insetPx }}>
           {eyebrow && <p className="text-[8px] uppercase tracking-widest text-muted-foreground">{eyebrow}</p>}
@@ -100,6 +118,11 @@ export function LabelPreview({
             <span className="rotate-[-22deg] select-none text-[28px] font-bold uppercase tracking-widest text-destructive/35">
               {watermark}
             </span>
+          </div>
+        )}
+        {qr && qrDense && (
+          <div className="absolute left-1 top-1 flex items-center gap-1 rounded bg-destructive/15 px-1.5 py-0.5 text-[9px] font-semibold text-destructive">
+            <AlertTriangle size={9} /> QR too dense
           </div>
         )}
         {reprintCount && reprintCount > 0 && (

@@ -1,10 +1,35 @@
-// Pure report builders — return { columns, rows, meta }. No UI, no I/O beyond
-// listTable. Reusable by future scheduled jobs / API routes.
+// Pure report builders — return { columns, rows, meta }. No UI.
+//
+// Performance safeguards:
+//   - All non-search reports default to a 7-day window (callers should also
+//     pass a range; this is a soft fallback).
+//   - HARD_ROW_CAP guards browser memory: rows above the cap are dropped and
+//     the report is flagged `truncated: true` so the UI can warn operators
+//     to narrow their filters.
+//   - All listTable() calls go through a memoized loader so a single Reports
+//     session does not re-scan the same table for every report kind.
 import { listTable } from "@/lib/data";
 import type { Report } from "@/lib/exporters";
 import { parseReason } from "@/lib/reprintPolicy";
 
 export interface DateRange { from?: Date; to?: Date; }
+
+/** Hard browser-side row cap. Above this we truncate + warn. */
+export const HARD_ROW_CAP = 5000;
+/** Default look-back when no explicit range is supplied. */
+export const DEFAULT_RANGE_DAYS = 7;
+
+export function defaultRange(): DateRange {
+  const to = new Date();
+  const from = new Date(to.getTime() - DEFAULT_RANGE_DAYS * 86_400_000);
+  from.setHours(0, 0, 0, 0);
+  return { from, to };
+}
+
+function effective(r?: DateRange): DateRange {
+  if (r && (r.from || r.to)) return r;
+  return defaultRange();
+}
 
 function inRange(d: any, r?: DateRange) {
   if (!r || (!r.from && !r.to)) return true;
@@ -16,16 +41,43 @@ function inRange(d: any, r?: DateRange) {
 }
 const stamp = () => new Date().toLocaleString();
 
+function capRows<T>(rows: T[]): { rows: T[]; truncated: boolean; total: number } {
+  if (rows.length <= HARD_ROW_CAP) return { rows, truncated: false, total: rows.length };
+  return { rows: rows.slice(0, HARD_ROW_CAP), truncated: true, total: rows.length };
+}
+
+function withCap(report: Omit<Report, "rows"> & { rows: any[] }): Report {
+  const { rows, truncated, total } = capRows(report.rows);
+  const meta = { ...(report.meta || {}), truncated, total, cap: HARD_ROW_CAP };
+  const subtitle = truncated
+    ? `${report.subtitle ? report.subtitle + " · " : ""}Truncated to ${HARD_ROW_CAP} of ${total} rows. Narrow filters.`
+    : report.subtitle;
+  return { ...report, rows, subtitle, meta };
+}
+
+// ---------- Memoized loader (per-session shared cache) ----------
+const cache: Record<string, { at: number; data: any[] }> = {};
+const TTL = 30_000;
+async function load<T = any>(table: string): Promise<T[]> {
+  const c = cache[table];
+  if (c && Date.now() - c.at < TTL) return c.data as T[];
+  const data = await listTable<T>(table);
+  cache[table] = { at: Date.now(), data: data as any[] };
+  return data;
+}
+/** Force-clear the loader cache (e.g. after a write). */
+export function invalidateReportCache(table?: string) {
+  if (!table) { for (const k of Object.keys(cache)) delete cache[k]; return; }
+  delete cache[table];
+}
+
+// ---------- Builders ----------
 export async function batchTraceability(batchOrLabelOrOrder: string): Promise<Report> {
   const term = batchOrLabelOrOrder.trim().toLowerCase();
   const [labels, cartons, contents, dpls, pis, shipping, gates] = await Promise.all([
-    listTable<any>("ols_production_labels"),
-    listTable<any>("ols_cartons"),
-    listTable<any>("ols_carton_contents"),
-    listTable<any>("ols_dpl_documents"),
-    listTable<any>("ols_finance_pi"),
-    listTable<any>("ols_shipping_labels"),
-    listTable<any>("ols_gate_scans"),
+    load<any>("ols_production_labels"), load<any>("ols_cartons"), load<any>("ols_carton_contents"),
+    load<any>("ols_dpl_documents"), load<any>("ols_finance_pi"),
+    load<any>("ols_shipping_labels"), load<any>("ols_gate_scans"),
   ]);
   const matchedLabels = labels.filter(l =>
     [l.label_no, l.batch_no, l.metadata?.batch_no, l.metadata?.sku].some(v => String(v || "").toLowerCase() === term)
@@ -33,11 +85,14 @@ export async function batchTraceability(batchOrLabelOrOrder: string): Promise<Re
   );
   const rows: any[] = [];
   for (const l of matchedLabels) {
+    // FK-first chain resolution (avoid order_ref unless nothing else matches)
     const link = contents.find(c => c.production_label_id === l.id);
     const ctn = link ? cartons.find(c => c.id === link.carton_id) : undefined;
-    const dpl = ctn ? dpls.find(d => d.order_ref === ctn.order_ref) : undefined;
-    const pi = ctn ? pis.find(p => p.order_ref === ctn.order_ref) : undefined;
     const ship = ctn ? shipping.find(s => s.carton_id === ctn.id) : undefined;
+    const pi = ship?.pi_id ? pis.find(p => p.id === ship.pi_id)
+            : ctn ? pis.find(p => p.order_ref === ctn.order_ref) : undefined;
+    const dpl = pi?.dpl_id ? dpls.find(d => d.id === pi.dpl_id)
+             : ctn ? dpls.find(d => d.order_ref === ctn.order_ref) : undefined;
     const gate = ship ? gates.find(g => g.shipping_label_id === ship.id) : undefined;
     rows.push({
       label_no: l.label_no, sku: l.metadata?.sku, batch: l.batch_no || l.metadata?.batch_no,
@@ -48,7 +103,7 @@ export async function batchTraceability(batchOrLabelOrOrder: string): Promise<Re
       gate: gate?.result?.toUpperCase(), gate_at: gate?.scanned_at,
     });
   }
-  return {
+  return withCap({
     title: "Batch Traceability Report",
     subtitle: `Search: ${batchOrLabelOrOrder} · ${rows.length} label(s)`,
     generatedAt: stamp(),
@@ -61,16 +116,15 @@ export async function batchTraceability(batchOrLabelOrOrder: string): Promise<Re
       { key: "gate", header: "Gate" }, { key: "gate_at", header: "Gate at" },
     ],
     rows,
-  };
+  });
 }
 
 export async function cartonMovement(range?: DateRange): Promise<Report> {
+  const r = effective(range);
   const [moves, labels, cartons] = await Promise.all([
-    listTable<any>("ols_inventory_movements"),
-    listTable<any>("ols_production_labels"),
-    listTable<any>("ols_cartons"),
+    load<any>("ols_inventory_movements"), load<any>("ols_production_labels"), load<any>("ols_cartons"),
   ]);
-  const rows = moves.filter(m => inRange(m.created_at, range)).map(m => {
+  const rows = moves.filter(m => inRange(m.created_at, r)).map(m => {
     const l = labels.find(x => x.id === m.production_label_id);
     const c = cartons.find(x => x.carton_no === m.reference_no);
     return {
@@ -79,7 +133,7 @@ export async function cartonMovement(range?: DateRange): Promise<Report> {
       label: l?.label_no || "", carton: m.reference_no, customer: c?.customer_name,
     };
   });
-  return {
+  return withCap({
     title: "Carton Movement Report", generatedAt: stamp(),
     columns: [
       { key: "when", header: "When" }, { key: "type", header: "Type" },
@@ -87,19 +141,18 @@ export async function cartonMovement(range?: DateRange): Promise<Report> {
       { key: "label", header: "Label" }, { key: "carton", header: "Carton" }, { key: "customer", header: "Customer" },
     ],
     rows,
-  };
+  });
 }
 
 export async function dispatchVerification(range?: DateRange): Promise<Report> {
+  const r = effective(range);
   const [shipping, cartons, pis, gates] = await Promise.all([
-    listTable<any>("ols_shipping_labels"),
-    listTable<any>("ols_cartons"),
-    listTable<any>("ols_finance_pi"),
-    listTable<any>("ols_gate_scans"),
+    load<any>("ols_shipping_labels"), load<any>("ols_cartons"),
+    load<any>("ols_finance_pi"), load<any>("ols_gate_scans"),
   ]);
-  const rows = shipping.filter(s => inRange(s.created_at, range)).map(s => {
+  const rows = shipping.filter(s => inRange(s.created_at, r)).map(s => {
     const c = cartons.find(x => x.id === s.carton_id);
-    const p = pis.find(x => x.id === s.pi_id);
+    const p = s.pi_id ? pis.find(x => x.id === s.pi_id) : undefined;
     const g = gates.find(x => x.shipping_label_id === s.id);
     return {
       shipping: s.shipping_no, qr: s.qr_ref, carton: c?.carton_no, status: c?.status,
@@ -108,7 +161,7 @@ export async function dispatchVerification(range?: DateRange): Promise<Report> {
       gate_reason: g?.reason || "",
     };
   });
-  return {
+  return withCap({
     title: "Dispatch Verification Report", generatedAt: stamp(),
     columns: [
       { key: "shipping", header: "Shipping" }, { key: "qr", header: "QR" },
@@ -117,15 +170,13 @@ export async function dispatchVerification(range?: DateRange): Promise<Report> {
       { key: "consignee", header: "Consignee" }, { key: "gate", header: "Gate" }, { key: "gate_reason", header: "Reason" },
     ],
     rows,
-  };
+  });
 }
 
 export async function gateClearance(range?: DateRange): Promise<Report> {
-  const [gates, ship] = await Promise.all([
-    listTable<any>("ols_gate_scans"),
-    listTable<any>("ols_shipping_labels"),
-  ]);
-  const rows = gates.filter(g => inRange(g.scanned_at || g.created_at, range)).map(g => {
+  const r = effective(range);
+  const [gates, ship] = await Promise.all([load<any>("ols_gate_scans"), load<any>("ols_shipping_labels")]);
+  const rows = gates.filter(g => inRange(g.scanned_at || g.created_at, r)).map(g => {
     const s = ship.find(x => x.id === g.shipping_label_id);
     return {
       when: new Date(g.scanned_at || g.created_at).toLocaleString(),
@@ -133,7 +184,7 @@ export async function gateClearance(range?: DateRange): Promise<Report> {
       shipping: s?.shipping_no, consignee: s?.consignee,
     };
   });
-  return {
+  return withCap({
     title: "Gate Clearance Report", generatedAt: stamp(),
     columns: [
       { key: "when", header: "When" }, { key: "qr", header: "QR" },
@@ -141,29 +192,28 @@ export async function gateClearance(range?: DateRange): Promise<Report> {
       { key: "shipping", header: "Shipping" }, { key: "consignee", header: "Consignee" },
     ],
     rows,
-  };
+  });
 }
 
 export async function printReprintAudit(range?: DateRange): Promise<Report> {
-  const [logs, reqs] = await Promise.all([
-    listTable<any>("ols_print_logs"),
-    listTable<any>("ols_reprint_requests"),
-  ]);
-  const reqRows = reqs.filter(r => inRange(r.created_at, range)).map(r => {
-    const p = parseReason(r.reason);
+  const r = effective(range);
+  const [logs, reqs] = await Promise.all([load<any>("ols_print_logs"), load<any>("ols_reprint_requests")]);
+  const reqRows = reqs.filter(x => inRange(x.created_at, r)).map(x => {
+    const p = parseReason(x.reason);
     return {
-      when: new Date(r.created_at).toLocaleString(),
-      ref_type: r.ref_type, ref_id: r.ref_id?.slice(0, 8),
-      status: r.status, category: p.category, approver: p.approver || "", remarks: p.remarks || "",
+      when: new Date(x.created_at).toLocaleString(),
+      ref_type: x.ref_type, ref_id: x.ref_id?.slice(0, 8),
+      status: x.status, category: p.category, approver: p.approver || "", remarks: p.remarks || "",
       override: p.override || "", details: p.details || "",
     };
   });
-  const printRows = logs.filter(l => inRange(l.created_at, range) && l.is_reprint).map(l => ({
+  const printRows = logs.filter(l => inRange(l.created_at, r) && l.is_reprint).map(l => ({
     when: new Date(l.created_at).toLocaleString(),
     ref_type: l.ref_type, ref_id: l.ref_id?.slice(0, 8),
-    status: l.success ? "printed" : "failed", category: l.reason || "", approver: "", remarks: "", override: "", details: "",
+    status: l.success ? "printed" : "failed", category: l.reason || "",
+    approver: "", remarks: "", override: "", details: "",
   }));
-  return {
+  return withCap({
     title: "Print / Reprint Audit", generatedAt: stamp(),
     columns: [
       { key: "when", header: "When" }, { key: "ref_type", header: "Ref Type" }, { key: "ref_id", header: "Ref" },
@@ -172,22 +222,21 @@ export async function printReprintAudit(range?: DateRange): Promise<Report> {
       { key: "remarks", header: "Remarks" }, { key: "details", header: "Details" },
     ],
     rows: [...reqRows, ...printRows].sort((a, b) => (a.when < b.when ? 1 : -1)),
-  };
+  });
 }
 
 export async function financeDiscrepancy(range?: DateRange): Promise<Report> {
+  const r = effective(range);
   const [pis, piCartons, cartons, dpls] = await Promise.all([
-    listTable<any>("ols_finance_pi"),
-    listTable<any>("ols_finance_pi_cartons"),
-    listTable<any>("ols_cartons"),
-    listTable<any>("ols_dpl_documents"),
+    load<any>("ols_finance_pi"), load<any>("ols_finance_pi_cartons"),
+    load<any>("ols_cartons"), load<any>("ols_dpl_documents"),
   ]);
   const rows: any[] = [];
-  for (const p of pis.filter(x => inRange(x.created_at, range))) {
+  for (const p of pis.filter(x => inRange(x.created_at, r))) {
     const attachedIds = piCartons.filter(c => c.pi_id === p.id).map(c => c.carton_id);
     const attached = cartons.filter(c => attachedIds.includes(c.id));
     const orderCartons = cartons.filter(c => c.order_ref === p.order_ref);
-    const dpl = dpls.find(d => d.id === p.dpl_id);
+    const dpl = p.dpl_id ? dpls.find(d => d.id === p.dpl_id) : undefined;
     const issues: string[] = [];
     if (attached.length === 0) issues.push("No cartons attached");
     if (dpl && dpl.total_cartons && attached.length !== dpl.total_cartons) issues.push(`DPL says ${dpl.total_cartons}, PI has ${attached.length}`);
@@ -201,7 +250,7 @@ export async function financeDiscrepancy(range?: DateRange): Promise<Report> {
       issues: issues.join("; ") || "OK",
     });
   }
-  return {
+  return withCap({
     title: "Finance Discrepancy Report", generatedAt: stamp(),
     columns: [
       { key: "when", header: "When" }, { key: "pi", header: "PI" },
@@ -211,7 +260,7 @@ export async function financeDiscrepancy(range?: DateRange): Promise<Report> {
       { key: "issues", header: "Issues" },
     ],
     rows,
-  };
+  });
 }
 
 export const REPORT_BUILDERS = {
