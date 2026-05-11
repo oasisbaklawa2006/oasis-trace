@@ -1,0 +1,177 @@
+import { useEffect, useState } from "react";
+import { PageHeader } from "@/components/PageHeader";
+import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
+import { listTable, insertRow } from "@/lib/data";
+import { num } from "@/lib/numbering";
+import { Printer, FileText } from "lucide-react";
+import { toast } from "sonner";
+import { Barcode } from "@/components/Barcode";
+import { StatusPill } from "@/components/StatusPill";
+
+export default function DPL() {
+  const [orders, setOrders] = useState<any[]>([]);
+  const [cartons, setCartons] = useState<any[]>([]);
+  const [contents, setContents] = useState<any[]>([]);
+  const [labels, setLabels] = useState<any[]>([]);
+  const [orderRef, setOrderRef] = useState("");
+  const [dpls, setDpls] = useState<any[]>([]);
+  const [active, setActive] = useState<any | null>(null);
+  const [activeCartons, setActiveCartons] = useState<any[]>([]);
+
+  useEffect(() => { (async () => {
+    setOrders(await listTable("ols_orders_cache"));
+    setCartons(await listTable("ols_cartons"));
+    setContents(await listTable("ols_carton_contents"));
+    setLabels(await listTable("ols_production_labels"));
+    setDpls(await listTable("ols_dpl_documents", { order: "created_at" }));
+  })(); }, []);
+
+  const cartonsForOrder = cartons.filter(c => c.order_ref === orderRef && c.status === "packed");
+
+  async function generateDPL() {
+    if (!orderRef) { toast.error("Pick an order"); return; }
+    if (cartonsForOrder.length === 0) { toast.error("No packed cartons for this order"); return; }
+    const order = orders.find(o => o.order_number === orderRef);
+    const totals = cartonsForOrder.reduce((acc, c) => ({
+      gross: acc.gross + (c.gross_weight || 0),
+      net: acc.net + (c.net_weight || 0),
+    }), { gross: 0, net: 0 });
+    const dpl = await insertRow<any>("ols_dpl_documents", {
+      dpl_no: num.dpl(),
+      order_ref: orderRef,
+      customer_name: order?.customer_name,
+      destination: order?.destination,
+      transport_mode: order?.transport_mode,
+      total_cartons: cartonsForOrder.length,
+      total_gross: totals.gross,
+      total_net: totals.net,
+      status: "open",
+    });
+    for (let i = 0; i < cartonsForOrder.length; i++) {
+      await insertRow("ols_dpl_cartons", { dpl_id: dpl.id, carton_id: cartonsForOrder[i].id, position: i + 1 });
+    }
+    setDpls(await listTable("ols_dpl_documents", { order: "created_at" }));
+    openDpl(dpl);
+    toast.success(`DPL ${dpl.dpl_no} created with ${cartonsForOrder.length} cartons`);
+  }
+
+  function openDpl(d: any) {
+    setActive(d);
+    const linked = cartons.filter(c => c.order_ref === d.order_ref && c.status !== "draft");
+    setActiveCartons(linked);
+  }
+
+  function cartonSummary(cartonId: string) {
+    const items = contents.filter(c => c.carton_id === cartonId);
+    const bySku: Record<string, { name: string; qty: number; net: number }> = {};
+    for (const it of items) {
+      const lbl = labels.find(l => l.id === it.production_label_id);
+      const sku = lbl?.metadata?.sku || it.manual_sku || "—";
+      const name = lbl?.metadata?.product_name || "—";
+      bySku[sku] ||= { name, qty: 0, net: 0 };
+      bySku[sku].qty += 1;
+      bySku[sku].net += lbl?.net_weight || 0;
+    }
+    return Object.entries(bySku).map(([sku, v]) => ({ sku, ...v }));
+  }
+
+  return (
+    <div>
+      <PageHeader
+        eyebrow="Dispatch"
+        title="DPL — Detailed Packing List"
+        description="Carton-wise bridge between dispatch and finance."
+        actions={<Button variant="outline" onClick={() => window.print()}><Printer size={16} className="mr-1.5" /> Print A4</Button>}
+      />
+
+      <div className="grid gap-6 lg:grid-cols-3">
+        <div className="ols-card p-5">
+          <h3 className="mb-3 text-sm font-semibold">Generate DPL</h3>
+          <Label className="mb-1.5 block text-xs text-muted-foreground">Order</Label>
+          <Select value={orderRef} onValueChange={setOrderRef}>
+            <SelectTrigger><SelectValue placeholder="Select order" /></SelectTrigger>
+            <SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.order_number}>{o.order_number} — {o.customer_name}</SelectItem>)}</SelectContent>
+          </Select>
+          <p className="mt-2 text-xs text-muted-foreground">{cartonsForOrder.length} packed carton(s) ready</p>
+          <Button onClick={generateDPL} className="mt-3 w-full bg-gradient-primary text-primary-foreground"><FileText size={16} className="mr-1.5" /> Generate DPL</Button>
+
+          <div className="mt-6">
+            <p className="ols-section-title mb-2">Recent DPLs</p>
+            {dpls.length === 0 ? <p className="text-xs text-muted-foreground">None yet.</p> :
+              <ul className="space-y-1.5">
+                {dpls.map(d => (
+                  <li key={d.id}>
+                    <button onClick={() => openDpl(d)} className="flex w-full items-center justify-between rounded-lg border bg-surface px-3 py-2 text-left text-xs hover:bg-secondary">
+                      <span className="font-mono">{d.dpl_no}</span>
+                      <span>{d.total_cartons} ctn</span>
+                      <StatusPill status={d.status} />
+                    </button>
+                  </li>
+                ))}
+              </ul>}
+          </div>
+        </div>
+
+        <div className="ols-card lg:col-span-2 p-6 print:shadow-none print:border-0" id="dpl-print">
+          {!active ? (
+            <p className="py-12 text-center text-sm text-muted-foreground">Select or generate a DPL to view A4 print sheet.</p>
+          ) : (
+            <div>
+              <div className="flex items-start justify-between border-b pb-4">
+                <div>
+                  <p className="text-[10px] font-semibold tracking-[0.2em] text-muted-foreground">OASIS BAKLAWA</p>
+                  <h2 className="text-xl font-semibold">Detailed Packing List</h2>
+                </div>
+                <div className="text-right text-xs">
+                  <p>DPL <span className="font-mono">{active.dpl_no}</span></p>
+                  <p>Order <span className="font-mono">{active.order_ref}</span></p>
+                  <p>Date {new Date(active.created_at).toLocaleDateString()}</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3 py-3 text-xs">
+                <div><span className="text-muted-foreground">Customer</span><p className="font-medium">{active.customer_name}</p></div>
+                <div><span className="text-muted-foreground">Destination</span><p className="font-medium">{active.destination}</p></div>
+                <div><span className="text-muted-foreground">Transport</span><p className="font-medium">{active.transport_mode}</p></div>
+                <div><span className="text-muted-foreground">Prepared</span><p className="font-medium">{new Date(active.prepared_at || active.created_at).toLocaleString()}</p></div>
+              </div>
+
+              <table className="w-full text-xs">
+                <thead className="bg-secondary text-left uppercase tracking-wider">
+                  <tr><th className="px-2 py-2">#</th><th className="px-2 py-2">Carton barcode</th><th className="px-2 py-2">SKU summary</th><th className="px-2 py-2 text-right">Qty</th><th className="px-2 py-2 text-right">Net kg</th><th className="px-2 py-2 text-right">Gross kg</th></tr>
+                </thead>
+                <tbody>
+                  {activeCartons.map((c, i) => {
+                    const sk = cartonSummary(c.id);
+                    return (
+                      <tr key={c.id} className="border-b align-top">
+                        <td className="px-2 py-2">{i + 1}</td>
+                        <td className="px-2 py-2">
+                          <p className="font-mono">{c.carton_no}</p>
+                          <div className="mt-1 max-w-[160px]"><Barcode value={c.carton_no} height={28} displayValue={false} /></div>
+                        </td>
+                        <td className="px-2 py-2">{sk.length === 0 ? "—" : sk.map(s => <div key={s.sku}>{s.name} <span className="text-muted-foreground">({s.sku})</span></div>)}</td>
+                        <td className="px-2 py-2 text-right">{sk.reduce((s, x) => s + x.qty, 0)}</td>
+                        <td className="px-2 py-2 text-right">{(c.net_weight || 0).toFixed(2)}</td>
+                        <td className="px-2 py-2 text-right">{(c.gross_weight || 0).toFixed(2)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr className="font-semibold">
+                    <td className="px-2 py-2" colSpan={3}>Totals · {active.total_cartons} cartons</td>
+                    <td className="px-2 py-2 text-right">—</td>
+                    <td className="px-2 py-2 text-right">{(active.total_net || 0).toFixed(2)}</td>
+                    <td className="px-2 py-2 text-right">{(active.total_gross || 0).toFixed(2)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
