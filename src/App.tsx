@@ -4,6 +4,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import AppShell from "@/components/AppShell";
+import AuthGate from "@/components/AuthGate";
 import Dashboard from "./pages/Dashboard";
 import ProductionEntry from "./pages/ProductionEntry";
 import StockUnits from "./pages/StockUnits";
@@ -30,27 +31,29 @@ const App = () => (
       <Toaster />
       <Sonner />
       <BrowserRouter>
-        <Routes>
-          <Route element={<AppShell />}>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/production" element={<ProductionEntry />} />
-            <Route path="/stock" element={<StockUnits />} />
-            <Route path="/cartons" element={<Cartonization />} />
-            <Route path="/dpl" element={<DPL />} />
-            <Route path="/finance" element={<FinancePI />} />
-            <Route path="/dispatch" element={<DispatchBundle />} />
-            <Route path="/shipping" element={<ShippingLabel />} />
-            <Route path="/gate" element={<GateScan />} />
-            <Route path="/trace" element={<Traceability />} />
-            <Route path="/printers" element={<Printers />} />
-            <Route path="/templates" element={<Templates />} />
-            <Route path="/print-logs" element={<PrintLogs />} />
-            <Route path="/reprints" element={<Reprints />} />
-            <Route path="/reports" element={<Reports />} />
-            <Route path="/settings" element={<Settings />} />
-          </Route>
-          <Route path="*" element={<NotFound />} />
-        </Routes>
+        <AuthGate>
+          <Routes>
+            <Route element={<AppShell />}>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/production" element={<ProductionEntry />} />
+              <Route path="/stock" element={<StockUnits />} />
+              <Route path="/cartons" element={<Cartonization />} />
+              <Route path="/dpl" element={<DPL />} />
+              <Route path="/finance" element={<FinancePI />} />
+              <Route path="/dispatch" element={<DispatchBundle />} />
+              <Route path="/shipping" element={<ShippingLabel />} />
+              <Route path="/gate" element={<GateScan />} />
+              <Route path="/trace" element={<Traceability />} />
+              <Route path="/printers" element={<Printers />} />
+              <Route path="/templates" element={<Templates />} />
+              <Route path="/print-logs" element={<PrintLogs />} />
+              <Route path="/reprints" element={<Reprints />} />
+              <Route path="/reports" element={<Reports />} />
+              <Route path="/settings" element={<Settings />} />
+            </Route>
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </AuthGate>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>
