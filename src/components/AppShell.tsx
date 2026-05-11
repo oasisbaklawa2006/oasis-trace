@@ -6,7 +6,7 @@ import {
   Menu, X, CircleDot, LogOut,
 } from "lucide-react";
 import { supabaseConfigured } from "@/lib/supabase";
-import { probeLiveMode, subscribeMode } from "@/lib/data";
+import { probeLiveMode, subscribeMode, subscribeOnline } from "@/lib/data";
 import { signOut, useAuthSession } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
@@ -33,13 +33,15 @@ export default function AppShell() {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<"live" | "demo" | "unknown">("unknown");
   const [, setModeError] = useState<string | undefined>();
+  const [online, setOnline] = useState(true);
   const { session } = useAuthSession();
   const location = useLocation();
   useEffect(() => setOpen(false), [location.pathname]);
   useEffect(() => {
     const off = subscribeMode((m, err) => { setMode(m); setModeError(err); });
+    const offOnline = subscribeOnline(setOnline);
     probeLiveMode();
-    return off;
+    return () => { off(); offOnline(); };
   }, []);
 
   const grouped = NAV.reduce<Record<string, typeof NAV>>((acc, item) => {
@@ -130,8 +132,13 @@ export default function AppShell() {
       {open && <div className="fixed inset-0 z-40 bg-black/40 lg:hidden" onClick={() => setOpen(false)} />}
 
       <main className="lg:pl-72">
+        {!online && (
+          <div className="border-b bg-destructive/15 px-6 py-2 text-xs font-semibold text-destructive no-print">
+            Offline — actions will retry when the connection returns.
+          </div>
+        )}
         {!supabaseConfigured && (
-          <div className="border-b bg-warning/10 px-6 py-2 text-xs text-warning-foreground/80">
+          <div className="border-b bg-warning/10 px-6 py-2 text-xs text-warning-foreground/80 no-print">
             Demo mode — add <code className="font-mono">VITE_SUPABASE_URL</code> and <code className="font-mono">VITE_SUPABASE_ANON_KEY</code>.
           </div>
         )}
