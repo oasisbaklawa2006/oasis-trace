@@ -65,8 +65,9 @@ export default function GateScan() {
     reload(); inputRef.current?.focus();
   }
 
+  const fastScan = typeof window !== "undefined" && window.matchMedia("(max-width: 640px)").matches;
   return (
-    <div>
+    <div className={fastScan ? "ols-fast-scan" : undefined}>
       <PageHeader eyebrow="Security" title="Exit Gate Scan Control" description="Scan shipping QR. Decision is GREEN allowed or RED hold with reason." />
 
       <div className="grid gap-6 lg:grid-cols-3">
