@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { listTable } from "@/lib/data";
-import { Factory, PackageCheck, Receipt, Tag, ShieldAlert, Printer, History, Activity } from "lucide-react";
+import { Factory, PackageCheck, Receipt, Tag, ShieldAlert, Printer, RotateCcw, Activity, ScanLine, Truck } from "lucide-react";
 import { StatusPill } from "@/components/StatusPill";
 
 interface CardDef { label: string; value: number | string; hint?: string; tone?: "primary" | "gold" | "muted"; icon: any; }
@@ -9,48 +9,57 @@ interface CardDef { label: string; value: number | string; hint?: string; tone?:
 export default function Dashboard() {
   const [labels, setLabels] = useState<any[]>([]);
   const [cartons, setCartons] = useState<any[]>([]);
-  const [dpls, setDpls] = useState<any[]>([]);
   const [pis, setPis] = useState<any[]>([]);
   const [shipping, setShipping] = useState<any[]>([]);
-  const [gateHolds, setGateHolds] = useState<any[]>([]);
+  const [gates, setGates] = useState<any[]>([]);
   const [printers, setPrinters] = useState<any[]>([]);
   const [scans, setScans] = useState<any[]>([]);
+  const [printLogs, setPrintLogs] = useState<any[]>([]);
+  const [reprints, setReprints] = useState<any[]>([]);
 
-  useEffect(() => {
-    (async () => {
-      setLabels(await listTable("ols_production_labels", { order: "created_at", limit: 200 }));
-      setCartons(await listTable("ols_cartons", { order: "created_at", limit: 200 }));
-      setDpls(await listTable("ols_dpl_documents", { order: "created_at", limit: 50 }));
-      setPis(await listTable("ols_finance_pi", { order: "created_at", limit: 50 }));
-      setShipping(await listTable("ols_shipping_labels", { order: "created_at", limit: 50 }));
-      const gs = await listTable<any>("ols_gate_scans", { order: "scanned_at", limit: 50 });
-      setGateHolds(gs.filter(s => s.result === "red"));
-      setPrinters(await listTable("ols_printers"));
-      setScans(await listTable<any>("ols_scan_history", { order: "created_at", limit: 6 }));
-    })();
-  }, []);
+  async function reload() {
+    setLabels(await listTable("ols_production_labels", { order: "created_at", limit: 200 }));
+    setCartons(await listTable("ols_cartons", { order: "created_at", limit: 200 }));
+    setPis(await listTable("ols_finance_pi", { order: "created_at", limit: 50 }));
+    setShipping(await listTable("ols_shipping_labels", { order: "created_at", limit: 50 }));
+    setGates(await listTable("ols_gate_scans", { order: "scanned_at", limit: 50 }));
+    setPrinters(await listTable("ols_printers"));
+    setScans(await listTable<any>("ols_scan_history", { order: "created_at", limit: 25 }));
+    setPrintLogs(await listTable<any>("ols_print_logs", { order: "created_at", limit: 25 }));
+    setReprints(await listTable("ols_reprint_requests", { order: "created_at", limit: 50 }));
+  }
+  useEffect(() => { reload(); const t = setInterval(reload, 30_000); return () => clearInterval(t); }, []);
 
   const today = new Date().toDateString();
   const todays = (rows: any[], key = "created_at") => rows.filter(r => r[key] && new Date(r[key]).toDateString() === today);
+  const failedScansToday = todays(scans).filter(s => s.result && s.result !== "green").length;
+  const reprintsToday = todays(reprints).length;
+  const pendingDispatch = shipping.filter(s => s.status !== "dispatched").length;
+  const cleared = gates.filter(g => g.result === "green").length;
+  const held = gates.filter(g => g.result === "red").length;
+  const printersOnline = printers.filter(p => p.status === "online").length;
 
   const cards: CardDef[] = [
-    { label: "Production labels today", value: todays(labels).length, hint: `${labels.length} total`, tone: "primary", icon: Factory },
-    { label: "Cartons packed today", value: todays(cartons).length, hint: `${cartons.length} total`, tone: "gold", icon: PackageCheck },
-    { label: "DPL pending finance", value: dpls.filter(d => d.status !== "cleared").length, icon: Receipt },
-    { label: "PI pending clearance", value: pis.filter(p => p.status === "pending").length, icon: Receipt },
-    { label: "Shipping labels pending", value: cartons.filter(c => c.status === "invoiced").length, icon: Tag },
-    { label: "Gate holds (RED)", value: gateHolds.length, tone: "muted", icon: ShieldAlert },
-    { label: "Printers online", value: `${printers.filter(p => p.status === "online").length}/${printers.length}`, icon: Printer },
-    { label: "Reprint alerts", value: 0, icon: History },
+    { label: "Labels printed today", value: todays(printLogs).length, hint: `${printLogs.length} total`, tone: "primary", icon: Factory },
+    { label: "Cartons packed today", value: todays(cartons, "packed_at").length, hint: `${cartons.length} total`, tone: "gold", icon: PackageCheck },
+    { label: "Pending gate dispatch", value: pendingDispatch, hint: `${shipping.length} shipping labels`, icon: Truck },
+    { label: "Reprints raised today", value: reprintsToday, hint: `${reprints.filter(r => r.status === "pending").length} pending`, icon: RotateCcw },
+    { label: "Printers online", value: `${printersOnline}/${printers.length}`, icon: Printer },
+    { label: "Failed scans today", value: failedScansToday, tone: "muted", icon: ShieldAlert },
+    { label: "Gate cleared / held", value: `${cleared} / ${held}`, icon: ScanLine },
+    { label: "PI cleared today", value: todays(pis, "cleared_at").length, icon: Receipt },
   ];
+
+  // Activity feed: union of recent scans, print logs, gate scans
+  const activity = [
+    ...scans.slice(0, 15).map(s => ({ id: `s-${s.id}`, when: s.created_at, kind: "scan", text: `${s.scan_context || "scan"} · ${(s.scan_value || "").slice(0, 24)}`, status: s.result })),
+    ...printLogs.slice(0, 15).map(p => ({ id: `p-${p.id}`, when: p.created_at, kind: "print", text: `${p.is_reprint ? "Reprint" : "Print"} · ${p.ref_type}`, status: p.success ? "green" : "red" })),
+    ...gates.slice(0, 15).map(g => ({ id: `g-${g.id}`, when: g.scanned_at || g.created_at, kind: "gate", text: `Gate · ${(g.qr_ref || "").slice(0, 22)}`, status: g.result })),
+  ].filter(a => a.when).sort((a, b) => (a.when! < b.when! ? 1 : -1)).slice(0, 25);
 
   return (
     <div>
-      <PageHeader
-        eyebrow="Operations"
-        title="Control Tower"
-        description="Live view of production, packing, finance, and gate flow — every label traces back to its origin."
-      />
+      <PageHeader eyebrow="Operations" title="Control Tower" description="Live view of production, packing, finance, gate flow and printer health. Auto-refreshes every 30s." />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         {cards.map((c) => (
@@ -70,49 +79,67 @@ export default function Dashboard() {
         ))}
       </div>
 
-      <div className="mt-8 grid gap-6 lg:grid-cols-3">
+      {/* Printer status strip */}
+      <section className="mt-6 ols-card p-4">
+        <p className="ols-section-title mb-2">Printers</p>
+        {printers.length === 0 ? <p className="text-sm text-muted-foreground">No printers configured.</p> : (
+          <div className="flex flex-wrap gap-2">
+            {printers.map(p => (
+              <div key={p.id} className="flex items-center gap-2 rounded-xl border bg-surface px-3 py-2">
+                <Printer size={14} className="text-muted-foreground" />
+                <div>
+                  <p className="text-xs font-semibold">{p.name}</p>
+                  <p className="text-[10px] text-muted-foreground">{p.model} · {p.command_lang}</p>
+                </div>
+                <StatusPill status={p.status} />
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <div className="mt-6 grid gap-6 lg:grid-cols-3">
         <section className="ols-card p-5 lg:col-span-2">
-          <header className="mb-4 flex items-center justify-between">
+          <header className="mb-3 flex items-center justify-between">
             <div>
-              <p className="ols-section-title">Recent production</p>
-              <h3 className="text-base font-semibold">Latest origin labels</h3>
+              <p className="ols-section-title">Recent activity</p>
+              <h3 className="text-base font-semibold">Floor, prints, gate</h3>
             </div>
             <Activity size={16} className="text-muted-foreground" />
           </header>
-          {labels.length === 0 ? (
-            <p className="py-6 text-center text-sm text-muted-foreground">No production yet — run the demo workflow from Production Entry.</p>
+          {activity.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">Activity will appear here.</p>
           ) : (
-            <div className="space-y-2">
-              {labels.slice(0, 6).map(l => (
-                <div key={l.id} className="flex items-center justify-between rounded-xl border bg-surface px-3 py-2.5">
-                  <div className="min-w-0">
-                    <p className="truncate font-mono text-xs text-muted-foreground">{l.label_no}</p>
-                    <p className="truncate text-sm font-medium">{l.product_name || l.metadata?.product_name || "—"}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xs text-muted-foreground">{l.net_weight} kg</p>
-                    <StatusPill status={l.status} />
-                  </div>
-                </div>
+            <ul className="divide-y">
+              {activity.map(a => (
+                <li key={a.id} className="flex items-center justify-between gap-2 py-1.5 text-xs">
+                  <span className="rounded bg-secondary px-1.5 py-0.5 font-mono uppercase text-[9px] text-secondary-foreground">{a.kind}</span>
+                  <span className="flex-1 truncate">{a.text}</span>
+                  <span className="text-[10px] text-muted-foreground">{a.when ? new Date(a.when).toLocaleTimeString() : ""}</span>
+                  {a.status && <StatusPill status={a.status} />}
+                </li>
               ))}
-            </div>
+            </ul>
           )}
         </section>
 
         <section className="ols-card p-5">
-          <p className="ols-section-title">Recent scans</p>
-          <h3 className="mb-3 text-base font-semibold">Gate & floor activity</h3>
-          {scans.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Scans will appear here.</p>
+          <p className="ols-section-title">Recent labels</p>
+          <h3 className="mb-3 text-base font-semibold">Latest origin labels</h3>
+          {labels.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No production yet.</p>
           ) : (
-            <ul className="space-y-2">
-              {scans.map((s: any) => (
-                <li key={s.id} className="flex items-center gap-2 text-xs">
-                  <StatusPill status={s.result} />
-                  <span className="font-mono text-muted-foreground">{(s.scan_value || "").slice(0, 18)}</span>
-                </li>
+            <div className="space-y-2">
+              {labels.slice(0, 6).map(l => (
+                <div key={l.id} className="flex items-center justify-between rounded-xl border bg-surface px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="truncate font-mono text-[11px] text-muted-foreground">{l.label_no}</p>
+                    <p className="truncate text-xs font-medium">{l.product_name || l.metadata?.product_name || "—"}</p>
+                  </div>
+                  <StatusPill status={l.status} />
+                </div>
               ))}
-            </ul>
+            </div>
           )}
         </section>
       </div>

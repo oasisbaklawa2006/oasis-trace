@@ -3,7 +3,8 @@ import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { listTable, insertRow, updateRow } from "@/lib/data";
-import { ShieldCheck, ShieldAlert, ScanLine } from "lucide-react";
+import { ShieldCheck, ShieldAlert, ScanLine, Volume2, VolumeX } from "lucide-react";
+import { feedback, isFeedbackEnabled, setFeedbackEnabled } from "@/lib/scanFeedback";
 
 interface Result { kind: "green" | "red"; title: string; reason?: string; ref?: string; }
 
@@ -61,6 +62,7 @@ export default function GateScan() {
         details: { qr_ref: ref, reason: res.reason },
       });
     }
+    feedback(res.kind === "green" ? "ok" : (res.title === "DUPLICATE" ? "dup" : "error"));
     setResult(res); setScan("");
     reload(); inputRef.current?.focus();
   }
@@ -80,6 +82,9 @@ export default function GateScan() {
               className="h-14 font-mono text-lg"
             />
             <Button onClick={check} className="h-14 px-6 bg-gradient-primary text-primary-foreground"><ScanLine size={20} /></Button>
+            <Button variant="outline" className="h-14 px-3" onClick={() => { setFeedbackEnabled(!isFeedbackEnabled()); location.reload(); }} title="Toggle scan beep + vibration">
+              {isFeedbackEnabled() ? <Volume2 size={18} /> : <VolumeX size={18} />}
+            </Button>
           </div>
 
           <div className={`mt-6 rounded-2xl border-2 p-8 text-center transition-all ${

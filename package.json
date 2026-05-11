@@ -50,6 +50,8 @@
     "embla-carousel-react": "^8.6.0",
     "input-otp": "^1.4.2",
     "jsbarcode": "^3.12.3",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.7",
     "lucide-react": "^0.462.0",
     "next-themes": "^0.3.0",
     "qrcode.react": "^4.2.0",
