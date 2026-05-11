@@ -1,14 +1,26 @@
+import { useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Slider } from "@/components/ui/slider";
 import { supabaseConfigured } from "@/lib/supabase";
 import { demo } from "@/lib/demoStore";
 import { toast } from "sonner";
+import {
+  feedback, getVolume, setVolume,
+  isMuted, setMuted,
+  isFeedbackEnabled, setFeedbackEnabled,
+} from "@/lib/scanFeedback";
+import { Volume2, VolumeX } from "lucide-react";
 
 const ROLES = ["super_admin", "qa", "hod", "store", "packing", "dispatch", "finance", "gate", "catalogue"];
 const MODULES = ["dashboard", "production_entry", "stock_units", "cartonization", "dpl", "finance_pi", "shipping", "gate_scan", "templates", "printers", "reports"];
 
 export default function Settings() {
+  const [vol, setVol] = useState(Math.round(getVolume() * 100));
+  const [muted, setMutedState] = useState(isMuted());
+  const [enabled, setEnabledState] = useState(isFeedbackEnabled());
   return (
     <div>
       <PageHeader eyebrow="Admin" title="Settings & Permissions" description="Roles × modules. Checkbox-driven permissions matrix (MVP)." />
