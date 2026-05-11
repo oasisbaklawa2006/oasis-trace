@@ -44,10 +44,10 @@ export function isOnline() { return typeof navigator === "undefined" ? true : na
 
 // ---------- Helpers ----------
 const TIMEOUT_MS = 10_000;
-function withTimeout<T>(p: Promise<T>, ms = TIMEOUT_MS): Promise<T> {
-  return new Promise((resolve, reject) => {
+function withTimeout<T>(p: PromiseLike<T>, ms = TIMEOUT_MS): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
     const t = setTimeout(() => reject(new Error("Supabase request timeout")), ms);
-    p.then(v => { clearTimeout(t); resolve(v); }, e => { clearTimeout(t); reject(e); });
+    Promise.resolve(p).then(v => { clearTimeout(t); resolve(v); }, e => { clearTimeout(t); reject(e); });
   });
 }
 async function withRetry<T>(fn: () => Promise<T>, attempts = 2): Promise<T> {
