@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { listTable, insertRow, updateRow } from "@/lib/data";
 import { num } from "@/lib/numbering";
-import { Barcode } from "@/components/Barcode";
+import { LabelPreview } from "@/components/LabelPreview";
 import { ScanBarcode, PackagePlus, Printer, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { StatusPill } from "@/components/StatusPill";
@@ -76,8 +76,9 @@ export default function Cartonization() {
     setRecentCartons(await listTable("ols_cartons", { order: "created_at", limit: 6 }));
   }
 
+  const fastScan = typeof window !== "undefined" && window.matchMedia("(max-width: 640px)").matches;
   return (
-    <div>
+    <div className={fastScan ? "ols-fast-scan" : undefined}>
       <PageHeader
         eyebrow="Dispatch"
         title="Cartonization & Packing"
@@ -147,17 +148,19 @@ export default function Cartonization() {
         </div>
 
         <div className="ols-card p-5 lg:col-span-2">
-          <h3 className="mb-3 text-sm font-semibold">Carton label preview</h3>
-          <div className="rounded-xl border bg-surface p-4">
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">100 × 75 mm Carton</p>
-            <p className="mt-1 text-base font-semibold">{carton?.customer_name || "Customer"}</p>
-            <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
-              <div>Order <span className="font-mono text-foreground">{carton?.order_ref || "—"}</span></div>
-              <div>Carton {carton?.carton_index ?? "—"} of —</div>
-              <div>Items {contents.length}</div>
-              <div>Net {contents.reduce((s, c) => s + (c.label?.net_weight || 0), 0).toFixed(2)} kg</div>
-            </div>
-            <div className="mt-3 flex justify-center"><Barcode value={carton?.carton_no || "CTN-PREVIEW-0001"} height={50} /></div>
+          <h3 className="mb-3 text-sm font-semibold">Carton label preview · 100 × 75 mm</h3>
+          <div className="flex justify-center py-3">
+            <LabelPreview
+              widthMm={100} heightMm={75}
+              eyebrow="Carton · 100 × 75 mm"
+              title={carton?.customer_name || "Customer"}
+              lines={[
+                `Order ${carton?.order_ref || "—"}`,
+                `Carton ${carton?.carton_index ?? "—"} · Items ${contents.length}`,
+                `Net ${contents.reduce((s, c) => s + (c.label?.net_weight || 0), 0).toFixed(2)} kg`,
+              ]}
+              barcode={carton?.carton_no || "CTN-PREVIEW-0001"}
+            />
           </div>
 
           <div className="mt-5 flex items-start gap-2 rounded-xl bg-warning/10 p-3 text-xs text-warning-foreground/80">

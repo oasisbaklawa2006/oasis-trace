@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { listTable, insertRow } from "@/lib/data";
 import { num } from "@/lib/numbering";
-import { Barcode } from "@/components/Barcode";
+import { LabelPreview } from "@/components/LabelPreview";
 import { Printer, Save } from "lucide-react";
 import { toast } from "sonner";
 import { StatusPill } from "@/components/StatusPill";
@@ -146,19 +146,19 @@ export default function ProductionEntry() {
         </div>
 
         <div className="ols-card p-5 lg:col-span-2">
-          <h3 className="mb-3 text-sm font-semibold">Live label preview</h3>
-          <div className="rounded-xl border bg-surface p-4">
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">75 × 50 mm Product</p>
-            <p className="mt-1 text-base font-semibold">{product?.name || "Cashew Pyramid Baklawa"}</p>
-            <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
-              <div>SKU <span className="font-mono text-foreground">{product?.sku || "CPB-5000"}</span></div>
-              <div>Batch <span className="font-mono text-foreground">{form.batch_no}</span></div>
-              <div>MFG {form.mfg_date}</div>
-              <div>Shelf {form.shelf_life_days}d</div>
-              <div>Net {form.net_weight || "—"} kg</div>
-              <div>Gross {form.gross_weight || "—"} kg</div>
-            </div>
-            <div className="mt-3 flex justify-center"><Barcode value={lastBatch[0]?.label_no || "PL-PREVIEW-0001"} height={48} /></div>
+          <h3 className="mb-3 text-sm font-semibold">Live label preview · 75 × 50 mm</h3>
+          <div className="flex justify-center py-3">
+            <LabelPreview
+              widthMm={75} heightMm={50}
+              eyebrow="Production · 75 × 50 mm"
+              title={product?.name || "Cashew Pyramid Baklawa"}
+              lines={[
+                `SKU ${product?.sku || "CPB-5000"}  Batch ${form.batch_no}`,
+                `MFG ${form.mfg_date}  Shelf ${form.shelf_life_days}d`,
+                `Net ${form.net_weight || "—"} kg  Gross ${form.gross_weight || "—"} kg`,
+              ]}
+              barcode={lastBatch[0]?.label_no || "PL-PREVIEW-0001"}
+            />
           </div>
 
           {lastBatch.length > 0 && (

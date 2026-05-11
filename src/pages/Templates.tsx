@@ -5,10 +5,9 @@ import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Button } from "@/components/ui/button";
 import { PRESET_SIZES } from "@/lib/labelSizes";
-import { Barcode } from "@/components/Barcode";
-import { QRCodeSVG } from "qrcode.react";
-import { generateTSPL, generateZPL } from "@/lib/printerCommands";
-import { Copy, Printer } from "lucide-react";
+import { LabelPreview } from "@/components/LabelPreview";
+import { generateTSPL, generateZPL, type Rotation } from "@/lib/printerCommands";
+import { Copy, Printer, RotateCw } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Templates() {
@@ -19,6 +18,8 @@ export default function Templates() {
   const [showSku, setShowSku] = useState(true);
   const [showWeight, setShowWeight] = useState(true);
   const [scale, setScale] = useState([1]);
+  const [rotation, setRotation] = useState<Rotation>(0);
+  const [showGrid, setShowGrid] = useState(false);
 
   useEffect(() => { (async () => {
     const t = await listTable<any>("ols_label_templates");
@@ -72,30 +73,38 @@ export default function Templates() {
             <Toggle label="Show QR" checked={showQr} onChange={setShowQr} />
             <Toggle label="Show SKU" checked={showSku} onChange={setShowSku} />
             <Toggle label="Show weight" checked={showWeight} onChange={setShowWeight} />
+            <Toggle label="Show grid" checked={showGrid} onChange={setShowGrid} />
             <div>
               <div className="mb-1 flex justify-between text-xs"><span className="text-muted-foreground">Font scale</span><span className="font-mono">{scale[0].toFixed(1)}×</span></div>
               <Slider value={scale} onValueChange={setScale} min={0.6} max={1.6} step={0.1} />
+            </div>
+            <div>
+              <div className="mb-1 flex justify-between text-xs"><span className="text-muted-foreground">Rotation</span><span className="font-mono">{rotation}°</span></div>
+              <div className="flex gap-1">
+                {[0, 90, 180, 270].map(r => (
+                  <button key={r} onClick={() => setRotation(r as Rotation)} className={`flex-1 rounded-md border px-2 py-1 text-xs ${rotation === r ? "border-primary bg-primary text-primary-foreground" : "bg-surface"}`}>
+                    <RotateCw size={10} className="inline mr-1" />{r}°
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         </div>
 
         <div className="ols-card p-5 lg:col-span-3">
-          <h3 className="mb-3 text-sm font-semibold">Live preview</h3>
-          <div className="flex justify-center">
-            <div
-              className="rounded-md border bg-white p-3 shadow-soft"
-              style={{ width: `${size.w * 3}px`, minHeight: `${size.h * 3}px`, transform: `scale(${scale[0]})`, transformOrigin: "center top" }}
-            >
-              <p className="text-[9px] uppercase tracking-widest text-muted-foreground">{size.label}</p>
-              <p className="mt-1 text-sm font-semibold leading-tight">{payload.title}</p>
-              <div className="mt-1 space-y-0.5 text-[10px] text-muted-foreground">
-                {payload.lines.map((l, i) => <div key={i}>{l}</div>)}
-              </div>
-              <div className="mt-2 flex items-end justify-between">
-                <Barcode value={payload.barcode} height={36} />
-                {showQr && <div className="ml-2"><QRCodeSVG value={payload.qr!} size={48} /></div>}
-              </div>
-            </div>
+          <h3 className="mb-3 text-sm font-semibold">Live preview · safe-area + barcode quiet zones</h3>
+          <div className="flex justify-center py-4">
+            <LabelPreview
+              widthMm={size.w} heightMm={size.h}
+              eyebrow={size.label}
+              title={payload.title}
+              lines={payload.lines}
+              barcode={payload.barcode}
+              qr={showQr ? payload.qr : undefined}
+              rotation={rotation}
+              scale={scale[0]}
+              showGrid={showGrid}
+            />
           </div>
 
           <div className="mt-6 grid gap-3 md:grid-cols-2">

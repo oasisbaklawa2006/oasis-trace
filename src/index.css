@@ -115,4 +115,24 @@
   .ols-section-title {
     @apply text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground;
   }
+  /* Mobile / handheld scanner mode — large tap targets, big result text. */
+  .ols-fast-scan input { @apply h-16 text-2xl; }
+  .ols-fast-scan button { @apply h-16 text-lg; }
 }
+
+/* Print styles — A4 dispatch bundles & DPL */
+@media print {
+  @page { size: A4; margin: 12mm; }
+  body { background: white !important; }
+  aside, header, nav, .no-print { display: none !important; }
+  main { padding: 0 !important; }
+  .print-sheet { page-break-inside: avoid; }
+  .print-sheet + .print-sheet { page-break-before: always; }
+  .print-only { display: block !important; }
+  .screen-only { display: none !important; }
+  table { page-break-inside: auto; }
+  tr { page-break-inside: avoid; page-break-after: auto; }
+  thead { display: table-header-group; }
+  tfoot { display: table-footer-group; }
+}
+.print-only { display: none; }
