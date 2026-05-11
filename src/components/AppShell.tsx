@@ -118,11 +118,9 @@ export default function AppShell() {
       {open && <div className="fixed inset-0 z-40 bg-black/40 lg:hidden" onClick={() => setOpen(false)} />}
 
       <main className="lg:pl-72">
-        {mode === "demo" && (
+        {mode === "demo" && !supabaseConfigured && (
           <div className="border-b bg-warning/10 px-6 py-2 text-xs text-warning-foreground/80">
-            {supabaseConfigured
-              ? <>Demo fallback active — Supabase reachable but RLS denied access. Run <code className="font-mono">db/ols_live_mode.sql</code> in Supabase to enable LIVE mode.</>
-              : <>Demo mode — add <code className="font-mono">VITE_SUPABASE_URL</code> and <code className="font-mono">VITE_SUPABASE_ANON_KEY</code>.</>}
+            Demo mode — add <code className="font-mono">VITE_SUPABASE_URL</code> and <code className="font-mono">VITE_SUPABASE_ANON_KEY</code>.
           </div>
         )}
         <div className="mx-auto max-w-[1400px] px-4 py-6 md:px-8 md:py-8 animate-fade-in">
