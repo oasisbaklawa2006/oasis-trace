@@ -82,6 +82,9 @@ export default function GateScan() {
               className="h-14 font-mono text-lg"
             />
             <Button onClick={check} className="h-14 px-6 bg-gradient-primary text-primary-foreground"><ScanLine size={20} /></Button>
+            <Button variant="outline" className="h-14 px-3" onClick={() => { setFeedbackEnabled(!isFeedbackEnabled()); location.reload(); }} title="Toggle scan beep + vibration">
+              {isFeedbackEnabled() ? <Volume2 size={18} /> : <VolumeX size={18} />}
+            </Button>
           </div>
 
           <div className={`mt-6 rounded-2xl border-2 p-8 text-center transition-all ${

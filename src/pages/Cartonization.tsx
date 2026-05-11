@@ -10,6 +10,7 @@ import { LabelPreview } from "@/components/LabelPreview";
 import { ScanBarcode, PackagePlus, Printer, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { StatusPill } from "@/components/StatusPill";
+import { feedback } from "@/lib/scanFeedback";
 
 export default function Cartonization() {
   const [orders, setOrders] = useState<any[]>([]);
@@ -50,8 +51,8 @@ export default function Cartonization() {
     const code = scanInput.trim();
     if (!code || !carton) return;
     const lbl = labels.find(l => l.label_no === code);
-    if (!lbl) { toast.error("Label not found", { description: "Use manual add if needed." }); return; }
-    if (packed.has(lbl.id)) { toast.error("Duplicate scan blocked", { description: "Label already in another active carton." }); return; }
+    if (!lbl) { feedback("error"); toast.error("Label not found", { description: "Use manual add if needed." }); return; }
+    if (packed.has(lbl.id)) { feedback("dup"); toast.error("Duplicate scan blocked", { description: "Label already in another active carton." }); return; }
     const row = await insertRow<any>("ols_carton_contents", { carton_id: carton.id, production_label_id: lbl.id });
     await insertRow("ols_inventory_movements", {
       production_label_id: lbl.id, from_location: "store", to_location: "packing",
@@ -60,6 +61,7 @@ export default function Cartonization() {
     setContents(c => [...c, { ...row, label: lbl }]);
     setPacked(p => new Set(p).add(lbl.id));
     setScanInput("");
+    feedback("ok");
   }
 
   async function finalizeCarton() {
