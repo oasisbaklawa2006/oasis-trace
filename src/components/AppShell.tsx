@@ -6,6 +6,7 @@ import {
   Menu, X, CircleDot,
 } from "lucide-react";
 import { supabaseConfigured } from "@/lib/supabase";
+import { probeLiveMode, subscribeMode } from "@/lib/data";
 import { cn } from "@/lib/utils";
 
 const NAV = [
