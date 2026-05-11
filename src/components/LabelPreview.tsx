@@ -1,9 +1,10 @@
 import { ReactNode, useMemo } from "react";
 import { Barcode } from "@/components/Barcode";
 import { QRCodeSVG } from "qrcode.react";
-import { mmToPx, recommendedQrSizeMm, SAFE_AREA_MM } from "@/lib/labelGeometry";
+import { mmToPx, qrTooDense, recommendedQrSizeMm, SAFE_AREA_MM, QUIET_ZONE_MM } from "@/lib/labelGeometry";
 import { cn } from "@/lib/utils";
 import type { Rotation } from "@/lib/printerCommands";
+import { AlertTriangle } from "lucide-react";
 
 export interface LabelPreviewProps {
   widthMm: number;
