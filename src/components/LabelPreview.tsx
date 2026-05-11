@@ -43,8 +43,10 @@ export function LabelPreview({
   const wPx = mmToPx(widthMm, scale * 2);
   const hPx = mmToPx(heightMm, scale * 2);
   const insetPx = mmToPx(SAFE_AREA_MM, scale * 2);
+  const quietPx = mmToPx(QUIET_ZONE_MM.CODE128, scale * 2);
   const qrSizeMm = qr ? recommendedQrSizeMm(widthMm, heightMm) : 0;
   const qrPx = mmToPx(qrSizeMm, scale * 2);
+  const qrDense = qr ? qrTooDense(qr.length, qrSizeMm) : false;
 
   const gridLines = useMemo(() => {
     if (!showGrid) return null;
