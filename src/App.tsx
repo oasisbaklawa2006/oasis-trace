@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
@@ -19,11 +20,19 @@ import Printers from "./pages/Printers";
 import Templates from "./pages/Templates";
 import PrintLogs from "./pages/PrintLogs";
 import Reprints from "./pages/Reprints";
-import Reports from "./pages/Reports";
+// Reports is heavy (jspdf + autotable + multi-table scans) — lazy load so it
+// never preloads on first render.
+const Reports = lazy(() => import("./pages/Reports"));
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
+
+const ReportsLazy = () => (
+  <Suspense fallback={<div className="p-10 text-sm text-muted-foreground">Loading reports…</div>}>
+    <Reports />
+  </Suspense>
+);
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -48,7 +57,7 @@ const App = () => (
               <Route path="/templates" element={<Templates />} />
               <Route path="/print-logs" element={<PrintLogs />} />
               <Route path="/reprints" element={<Reprints />} />
-              <Route path="/reports" element={<Reports />} />
+              <Route path="/reports" element={<ReportsLazy />} />
               <Route path="/settings" element={<Settings />} />
             </Route>
             <Route path="*" element={<NotFound />} />
