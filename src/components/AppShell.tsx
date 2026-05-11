@@ -3,10 +3,11 @@ import { useEffect, useState } from "react";
 import {
   LayoutDashboard, Printer, FileImage, Factory, Boxes, PackageCheck, ClipboardList,
   Receipt, Truck, Tag, ShieldCheck, Search, History, RotateCcw, BarChart3, Settings,
-  Menu, X, CircleDot,
+  Menu, X, CircleDot, LogOut,
 } from "lucide-react";
 import { supabaseConfigured } from "@/lib/supabase";
 import { probeLiveMode, subscribeMode } from "@/lib/data";
+import { signOut, useAuthSession } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -31,7 +32,8 @@ const NAV = [
 export default function AppShell() {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<"live" | "demo" | "unknown">("unknown");
-  const [modeError, setModeError] = useState<string | undefined>();
+  const [, setModeError] = useState<string | undefined>();
+  const { session } = useAuthSession();
   const location = useLocation();
   useEffect(() => setOpen(false), [location.pathname]);
   useEffect(() => {
@@ -100,7 +102,7 @@ export default function AppShell() {
             </div>
           ))}
         </nav>
-        <div className="px-6 pb-6 text-[11px] text-sidebar-foreground/55">
+        <div className="space-y-2 px-6 pb-6 text-[11px] text-sidebar-foreground/55">
           <div className={cn(
             "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]",
             mode === "live" ? "border-success/50 bg-success/15 text-success"
@@ -109,8 +111,18 @@ export default function AppShell() {
             <CircleDot size={10} />
             {mode === "live" ? "Live Supabase Mode" : "Demo Fallback Mode"}
           </div>
-          {mode === "demo" && modeError && (
-            <p className="mt-2 text-[10px] leading-snug text-sidebar-foreground/45">{modeError}</p>
+          <div className="inline-flex items-center gap-1.5 rounded-full border border-destructive/50 bg-destructive/15 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-destructive">
+            <CircleDot size={10} /> Test Mode — RLS Off
+          </div>
+          {session && (
+            <button
+              onClick={() => signOut()}
+              className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[11px] text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground"
+            >
+              <LogOut size={12} />
+              <span className="flex-1 truncate text-left">{session.user.email}</span>
+              <span className="opacity-60">Sign out</span>
+            </button>
           )}
         </div>
       </aside>
@@ -118,7 +130,7 @@ export default function AppShell() {
       {open && <div className="fixed inset-0 z-40 bg-black/40 lg:hidden" onClick={() => setOpen(false)} />}
 
       <main className="lg:pl-72">
-        {mode === "demo" && !supabaseConfigured && (
+        {!supabaseConfigured && (
           <div className="border-b bg-warning/10 px-6 py-2 text-xs text-warning-foreground/80">
             Demo mode — add <code className="font-mono">VITE_SUPABASE_URL</code> and <code className="font-mono">VITE_SUPABASE_ANON_KEY</code>.
           </div>
