@@ -38,17 +38,29 @@ export default function GateScan() {
       else if (ctn.status === "dispatched") res = { kind: "red", title: "DUPLICATE", reason: "Carton already dispatched" };
       else if (!pi || pi.status !== "cleared") res = { kind: "red", title: "HOLD", reason: "PI not cleared" };
       else if (!pi.invoice_ref) res = { kind: "red", title: "HOLD", reason: "Invoice missing" };
+      else if (lbl.status === "dispatched") res = { kind: "red", title: "DUPLICATE", reason: "Shipping label already dispatched" };
       else {
         res = { kind: "green", title: "ALLOWED", ref: ctn.carton_no };
         await updateRow("ols_cartons", ctn.id, { status: "dispatched" });
+        await updateRow("ols_shipping_labels", lbl.id, { status: "dispatched" });
         await insertRow("ols_inventory_movements", {
           production_label_id: null, from_location: "shipping", to_location: "dispatched",
           movement_type: "gate_clear", reference_no: ctn.carton_no,
         });
+        await insertRow("ols_audit_logs", {
+          action: "gate_dispatched", entity_type: "shipping_label", entity_id: lbl.id,
+          details: { carton_no: ctn.carton_no, shipping_no: lbl.shipping_no, qr_ref: ref },
+        });
       }
     }
     await insertRow("ols_gate_scans", { qr_ref: ref, shipping_label_id: lbl?.id, result: res.kind, reason: res.reason });
-    await insertRow("ols_scan_history", { scan_value: ref, scan_context: "gate", result: res.kind });
+    await insertRow("ols_scan_history", { scan_value: ref, scan_context: "gate", result: res.kind, metadata: { reason: res.reason || null } });
+    if (res.kind === "red") {
+      await insertRow("ols_audit_logs", {
+        action: "gate_hold", entity_type: "shipping_label", entity_id: lbl?.id,
+        details: { qr_ref: ref, reason: res.reason },
+      });
+    }
     setResult(res); setScan("");
     reload(); inputRef.current?.focus();
   }
