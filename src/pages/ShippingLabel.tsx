@@ -5,14 +5,15 @@ import { listTable, insertRow, updateRow } from "@/lib/data";
 import { num } from "@/lib/numbering";
 import { Tag, Printer } from "lucide-react";
 import { toast } from "sonner";
-import { Barcode } from "@/components/Barcode";
-import { QRCodeSVG } from "qrcode.react";
+import { LabelPreview } from "@/components/LabelPreview";
 import { StatusPill } from "@/components/StatusPill";
+import { ReprintModal } from "@/components/ReprintModal";
 
 export default function ShippingLabel() {
   const [cartons, setCartons] = useState<any[]>([]);
   const [pis, setPis] = useState<any[]>([]);
   const [labels, setLabels] = useState<any[]>([]);
+  const [reprint, setReprint] = useState<any | null>(null);
 
   useEffect(() => { reload(); }, []);
   async function reload() {
@@ -67,32 +68,53 @@ export default function ShippingLabel() {
         </section>
 
         <section className="ols-card p-5">
-          <h3 className="mb-3 text-sm font-semibold">Recent shipping labels</h3>
+          <h3 className="mb-3 text-sm font-semibold">Recent shipping labels · 100 × 150 mm</h3>
           {labels.length === 0 ? <p className="text-sm text-muted-foreground">None yet.</p> :
-            <ul className="space-y-3">
+            <ul className="space-y-4">
               {labels.slice(0, 4).map(l => (
                 <div key={l.id} className="rounded-xl border bg-surface p-3">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Shipping 100×150</p>
+                  <div className="flex items-start gap-3">
+                    <LabelPreview
+                      widthMm={100} heightMm={150}
+                      eyebrow="Shipping · 100 × 150 mm"
+                      title={l.consignee}
+                      lines={[
+                        `From ${l.consignor || "—"}`,
+                        `Invoice ${l.invoice_ref || "—"}`,
+                        l.shipping_no,
+                      ]}
+                      barcode={l.shipping_no}
+                      qr={l.qr_ref}
+                      scale={0.45}
+                    />
+                    <div className="flex-1 min-w-0">
                       <p className="font-mono text-sm font-semibold">{l.shipping_no}</p>
                       <p className="text-xs text-muted-foreground">To {l.consignee}</p>
                       <p className="text-[11px] text-muted-foreground">Invoice {l.invoice_ref || "—"}</p>
+                      <div className="mt-2 flex items-center justify-between">
+                        <StatusPill status={l.status} />
+                        <Button size="sm" variant="ghost" onClick={() => setReprint(l)}>
+                          <Printer size={14} className="mr-1" /> Reprint
+                        </Button>
+                      </div>
                     </div>
-                    <div className="rounded-md bg-white p-1.5">
-                      <QRCodeSVG value={l.qr_ref} size={64} />
-                    </div>
-                  </div>
-                  <div className="mt-2"><Barcode value={l.shipping_no} height={36} /></div>
-                  <div className="mt-2 flex items-center justify-between text-xs">
-                    <StatusPill status={l.status} />
-                    <Button size="sm" variant="ghost"><Printer size={14} className="mr-1" /> Reprint</Button>
                   </div>
                 </div>
               ))}
             </ul>}
         </section>
       </div>
+
+      {reprint && (
+        <ReprintModal
+          open={!!reprint}
+          onOpenChange={(o) => !o && setReprint(null)}
+          refType="shipping"
+          refId={reprint.id}
+          refLabel={reprint.shipping_no}
+          onConfirmed={() => reload()}
+        />
+      )}
     </div>
   );
 }
