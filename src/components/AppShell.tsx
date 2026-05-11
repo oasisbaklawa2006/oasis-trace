@@ -30,8 +30,15 @@ const NAV = [
 
 export default function AppShell() {
   const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<"live" | "demo" | "unknown">("unknown");
+  const [modeError, setModeError] = useState<string | undefined>();
   const location = useLocation();
   useEffect(() => setOpen(false), [location.pathname]);
+  useEffect(() => {
+    const off = subscribeMode((m, err) => { setMode(m); setModeError(err); });
+    probeLiveMode();
+    return off;
+  }, []);
 
   const grouped = NAV.reduce<Record<string, typeof NAV>>((acc, item) => {
     (acc[item.group] ||= []).push(item);
@@ -94,20 +101,28 @@ export default function AppShell() {
           ))}
         </nav>
         <div className="px-6 pb-6 text-[11px] text-sidebar-foreground/55">
-          <div className="flex items-center gap-1.5">
-            <CircleDot size={10} className={supabaseConfigured ? "text-success" : "text-warning"} />
-            {supabaseConfigured ? "Connected to Oasis Central" : "Offline — set Supabase env"}
+          <div className={cn(
+            "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]",
+            mode === "live" ? "border-success/50 bg-success/15 text-success"
+              : "border-warning/50 bg-warning/15 text-warning"
+          )}>
+            <CircleDot size={10} />
+            {mode === "live" ? "Live Supabase Mode" : "Demo Fallback Mode"}
           </div>
+          {mode === "demo" && modeError && (
+            <p className="mt-2 text-[10px] leading-snug text-sidebar-foreground/45">{modeError}</p>
+          )}
         </div>
       </aside>
 
       {open && <div className="fixed inset-0 z-40 bg-black/40 lg:hidden" onClick={() => setOpen(false)} />}
 
       <main className="lg:pl-72">
-        {!supabaseConfigured && (
+        {mode === "demo" && (
           <div className="border-b bg-warning/10 px-6 py-2 text-xs text-warning-foreground/80">
-            Demo mode — add <code className="font-mono">VITE_SUPABASE_URL</code> and{" "}
-            <code className="font-mono">VITE_SUPABASE_ANON_KEY</code> to connect to Oasis Central Supabase.
+            {supabaseConfigured
+              ? <>Demo fallback active — Supabase reachable but RLS denied access. Run <code className="font-mono">db/ols_live_mode.sql</code> in Supabase to enable LIVE mode.</>
+              : <>Demo mode — add <code className="font-mono">VITE_SUPABASE_URL</code> and <code className="font-mono">VITE_SUPABASE_ANON_KEY</code>.</>}
           </div>
         )}
         <div className="mx-auto max-w-[1400px] px-4 py-6 md:px-8 md:py-8 animate-fade-in">
