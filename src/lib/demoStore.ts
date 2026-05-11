@@ -89,7 +89,7 @@ export const demo = {
   },
   insert<T extends Row>(table: string, row: Partial<T>): T {
     db[table] ||= [];
-    const full = { id: crypto.randomUUID(), created_at: new Date().toISOString(), ...row } as T;
+    const full = { id: crypto.randomUUID(), created_at: new Date().toISOString(), ...row } as unknown as T;
     db[table].push(full);
     save(db);
     return full;
