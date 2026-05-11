@@ -80,6 +80,7 @@ export default function ProductionEntry() {
         production_label_id: label.id, from_location: "production", to_location: "store",
         movement_type: "production_inward", reference_no: batch.batch_no,
       });
+      await insertRow("ols_print_logs", { ref_type: "production_label", ref_id: label.id, success: true });
       created.push(label);
     }
     setLastBatch(created);
