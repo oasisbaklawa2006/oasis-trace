@@ -1,89 +1,109 @@
-## Scope
+# Phase 1 — Reprint Approval Workflow
 
-Twelve enhancement areas across the printer/label/traceability layer of Oasis Label Studio. Keep current UI theme, RLS off, Supabase Auth gating intact, no Lovable Cloud, no anon policies. Pure frontend + Supabase-native.
+Build a real pending → approved/rejected pipeline on top of the existing `ols_reprint_requests` table. No schema migration; we use columns we already write (`status`, `approver`, `reason`) plus JSONB `metadata` for `approval_remarks`, `approved_at`, `override_by`, `reprint_seq`.
 
-I'll group the 12 priorities into 6 implementation phases that share code, so we don't rebuild the same primitives twice.
+- `src/lib/reprintPolicy.ts`
+  - `getReprintCount(refType, refId)` — counts prior approved reprints from `ols_print_logs`.
+  - `requiresApproval(count)` — true for 2nd reprint onward.
+  - `canOverride(user)` — checks `localStorage` `ols_role` (`supervisor` | `admin`); architecture-ready for a future `ols_user_roles` table without enabling RLS now.
+- `src/components/ReprintModal.tsx` (extend)
+  - If `requiresApproval`: writes `ols_reprint_requests` with `status='pending'`, blocks the print, shows toast "Awaiting supervisor approval".
+  - Supervisor override toggle (visible only when `canOverride`): flips to `status='approved'`, stamps `metadata.override_by`, allows immediate print.
+  - Watermark text passes through to the printer payload as `DUPLICATE COPY` (TSPL/ZPL `watermark` already supported in `printerCommands.ts`) and `LabelPreview watermark` prop.
+- `src/pages/Reprints.tsx` (extend)
+  - Tabs: Pending / Approved / Rejected / All.
+  - Row actions for supervisors: Approve (with remarks), Reject (with remarks). Writes back `status`, `metadata.approval_remarks`, `metadata.approved_at`, `approver`.
+  - Re-fires the queued print when a pending request is approved.
 
----
+# Phase 2 — Advanced Traceability Search
 
-## Phase 1 — Print/Barcode Foundations (priorities 1, 2, 3)
+Single search box drives all entity types via a normalized search index built client-side from `ols_` tables.
 
-New shared primitives used by every label screen:
+- `src/lib/traceSearch.ts`
+  - `buildIndex()` — pulls `ols_production_labels`, `ols_cartons`, `ols_dpl`, `ols_finance_pi`, `ols_shipping_labels`, `ols_gate_scans`, `ols_customers`, `ols_orders` once, normalizes to `{ kind, id, ref, label, keywords[] }`, caches in `react-query` (5 min stale).
+  - Fuzzy matcher using lightweight Levenshtein + token prefix score (no new dep).
+  - Entity routing: maps each result to the existing chain resolver in `Traceability.tsx`.
+- `src/pages/Traceability.tsx` (extend)
+  - Quick Scan toggle (autofocus loop, large input).
+  - Recent searches in `localStorage` (`ols_recent_searches`, last 10).
+  - Result chips by type (SKU / Batch / Label / Carton / DPL / PI / Invoice / QR / Shipping / Customer / Order).
+  - One-click copy of the resolved chain JSON, CSV export of the timeline.
 
-- `src/lib/labelGeometry.ts` — mm↔px helpers at configurable DPI (203/300), safe-area insets, quiet-zone math for CODE128 / EAN13 / QR, recommended module width per DPI.
-- `src/lib/printerCommands.ts` (extend) — richer TSPL/ZPL emitters for production / carton / shipping / DPL barcode payloads, with rotation (0/90/180/270), copies, gap, black-mark offset, darkness, speed.
-- `src/components/LabelPreview.tsx` — single canvas-style preview component:
-  - mm-to-pixel calibration (uses geometry helpers)
-  - dashed safe-area border, optional 5 mm grid overlay
-  - rotation prop, scale prop
-  - text overflow → auto-shrink + ellipsis fallback
-  - barcode centering, quiet-zone padding, overflow guard (downscale module width)
-  - QR sizing rule: max 40% of shorter side, min 15 mm
-- `src/components/Barcode.tsx` (extend) — pass DPI, quiet zone, target mm width; auto-pick module width so the symbol fits without clipping.
+# Phase 3 — Audit Report Engine
 
-Wire `LabelPreview` into Production label cards, Carton labels, Shipping labels, and DPL header barcode.
+New `src/pages/Reports.tsx` (already exists — rebuild content) + shared print/export module.
 
-## Phase 2 — Printer Management (priority 4)
+- `src/lib/reports.ts`
+  - Six report builders, each returning `{ columns, rows, meta }`:
+    - `batchTraceability(batchOrPlNo)`
+    - `cartonMovement(dateRange)`
+    - `dispatchVerification(dateRange)`
+    - `gateClearance(dateRange)`
+    - `printReprintAudit(dateRange)`
+    - `financeDiscrepancy(dateRange)` — PI carton count vs attached, cartons missing DPL, etc.
+  - Pure data — no UI — so they're reusable by future scheduled jobs.
+- `src/lib/exporters.ts`
+  - `toCSV(rows, columns)` (download via blob).
+  - `toPrintableA4(report, opts)` — uses `PrintSheet.tsx` and `window.print()`.
+  - `toPDF(report)` — uses `jspdf` + `jspdf-autotable` (small, already build-friendly; add as dep).
+- `Reports.tsx`
+  - Left rail: report selector. Center: filter form (date range, entity ref). Right: preview table. Top-right: Print A4 / Export CSV / Export PDF buttons.
 
-`src/pages/Printers.tsx`:
+# Phase 4 — Printer Stability + Profile Presets
 
-- Test print button → emits TSPL/ZPL test pattern via `printerCommands`, copies to clipboard + opens print dialog.
-- Calibration drawer: width / height / gap / black-mark offset / darkness / speed sliders bound to local state.
-- "Save profile" persists to `ols_printers` row (`settings jsonb`); "Load profile" reads it back.
-- Profile selector on each label preview screen so generated commands use that printer's settings.
+- `src/lib/printerPresets.ts`
+  - Static presets: `TSC_TE244` (203 dpi, gap 3mm, density 8, speed 4), `ZEBRA_GK420` (203 dpi, ZPL, darkness 10, speed 4), `XPRINTER_GENERIC` (203 dpi, TSPL, gap 2mm), `GENERIC_TSPL`, `GENERIC_ZPL`.
+  - Each preset includes `thermalOffsetMm` (vertical compensation) and `xOffsetMm`.
+- `src/lib/printerCommands.ts` (extend)
+  - Apply `thermalOffsetMm` / `xOffsetMm` to first-element coords.
+  - Auto module-width downscale for CODE128 if computed width > usable width (already partial — finalize).
+  - Auto font scale: when `lines[i]` width estimate > usable, drop font size step until fits or 6pt floor.
+  - QR fallback: if `qr.length > 180 chars` switch to error-correction `L` and increase module size for readability; warn on overflow.
+- `src/components/Barcode.tsx` (extend) — surface the same overflow guard for on-screen previews so what users see matches what prints.
+- `src/pages/Printers.tsx` (extend) — preset dropdown that pre-fills the calibration drawer; "Save as profile" persists merged settings to `ols_printers.settings` JSONB.
 
-## Phase 3 — DPL Print Layout + Shipping Bundle (priorities 5, 6)
+# Phase 5 — Warehouse Productivity
 
-- `src/pages/DPL.tsx`: print-only stylesheet (`@media print`) with A4 layout, carton-grouped tables, SKU rollup summary, page-break-inside avoid on carton blocks, header/footer repeat.
-- `src/pages/DispatchBundle.tsx`: "Print Bundle" action renders a single printable document containing DPL + simplified packing list + PI summary + invoice ref + transport ref + gate pass + shipping label thumbnails, each section starting on a new page.
-- Shared `src/components/PrintSheet.tsx` wrapper for consistent A4 margins/typography.
+All client-only enhancements; reused by `GateScan.tsx`, `Cartonization.tsx`, and the future batch scan.
 
-## Phase 4 — Traceability Timeline (priority 7)
+- `src/lib/scanFeedback.ts`
+  - `playBeep(kind: 'ok' | 'error' | 'dup')` — WebAudio sine pulses (no asset).
+  - `vibrate(pattern)` — `navigator.vibrate` guard for Android handhelds.
+- `src/hooks/useScanLoop.ts`
+  - Autofocus recovery (refocus on blur after 100ms), Enter-to-submit, debounced duplicate suppression (300ms).
+  - `mode: 'single' | 'batch' | 'rapid-pack'`. Batch buffers scans and commits on Enter+Enter. Rapid-pack auto-advances cartons after N scans.
+- `Cartonization.tsx` / `GateScan.tsx` (extend)
+  - Mode toggle (Single / Batch / Rapid Pack), keyboard-only operation hints, OK/error sound + vibration on every scan result.
 
-Rework `src/pages/Traceability.tsx` results panel into a vertical timeline:
+# Phase 6 — Operational Dashboard
 
-```
-Production ─● Store ─● Carton ─● DPL ─● PI ─● Shipping ─● Gate ─● Dispatch
-```
+Rebuild `src/pages/Dashboard.tsx` content (keep shell + theme).
 
-Each node shows ref number, timestamp, status pill, actor. Uses existing chain query — UI only.
+- KPI cards (today, IST midnight rollover):
+  - Labels printed, Cartons packed, Pending gate dispatch, Reprints raised, Failed scans, Dispatch clearance status.
+- Printer status strip
+  - Reads `ols_printers.last_seen_at` (write-through from test print); >5min = offline.
+- Recent activity feed
+  - Union of `ols_print_logs`, `ols_scan_history`, `ols_gate_scans` last 25, color-coded.
+- All queries via `react-query` with `staleTime: 30s` and `refetchInterval: 30s`.
 
-## Phase 5 — Reprint Security + Mobile Warehouse (priorities 8, 9)
+# Cross-cutting
 
-- `src/components/ReprintModal.tsx`: reason (required, enum), optional approver name, writes `ols_print_logs` with `is_reprint=true`, `reason`, `reprint_count`. All "Reprint" buttons (Production, Carton, Shipping, DPL) route through it.
-- Reprinted previews render a diagonal "DUPLICATE" watermark + reprint counter badge.
-- `src/pages/GateScan.tsx` and `src/pages/Cartonization.tsx`: mobile mode toggle (auto-on under 640 px) — large scan input, big GREEN/RED result, single-column layout, autofocus loop for handheld scanners ("fast scan mode"), one-hand thumb-reach button placement.
+- New deps: `jspdf`, `jspdf-autotable` (Phase 3 only).
+- New tables: none. We piggyback on existing JSONB `metadata` / `settings` columns.
+- No RLS changes. No anon policies. No Lovable Cloud. UI theme untouched.
+- After each phase: smoke-test the existing seeded chain (`PL-20260511-9303 → CTN-20260511-6757 → DPL-20260511-865 → PI-20260511-205 → SHP-20260511-7665`) and verify CRUD + no regressions in production/carton/DPL/finance/shipping/gate flows.
 
-## Phase 6 — Performance + Error Handling (priorities 10, 11)
+# Technical notes
 
-- `src/lib/queryClient.ts`: react-query keys per ols_ table; replace ad-hoc `useEffect → listTable` calls in hot pages (Cartonization, FinancePI, Traceability, Dashboard) with `useQuery` + `staleTime` for master data (printers, templates, customers).
-- Optimistic updates for scan-add-to-carton and PI carton attach, with rollback on error.
-- `src/lib/data.ts`: wrap insert/update with retry (2x, exponential), surface `23505` duplicate as friendly toast, 10 s timeout via `AbortController`, offline detector (`navigator.onLine`) → top banner.
-- Printer failure state in test-print flow (try/catch around clipboard + print dialog).
+- Reprint approval state machine lives entirely in `ols_reprint_requests.status` + `metadata` to avoid migrations; a future migration can promote `metadata` keys to columns without code rewrite.
+- `traceSearch` index is in-memory + react-query-cached; for >50k rows we'd swap to a Supabase RPC, but seeded volumes don't warrant it now.
+- PDF export uses `jspdf-autotable` for table reports and a manual layout for batch traceability (mixed sections).
+- Scan feedback is opt-in via a Settings toggle (`localStorage.ols_scan_feedback`) so silent warehouses aren't disrupted.
+- Dashboard uses polling (not realtime) to stay portable across hosting (no Supabase realtime channels required).
 
----
+# Out of scope
 
-## Out of scope / unchanged
-
-- `db/ols_enable_rls_authenticated.sql` — not applied.
-- No theme/visual redesign — same tokens, same shell, same colors.
-- No Lovable Cloud, no anon policies, no schema migrations.
-
-## Deliverables
-
-New files:
-- `src/lib/labelGeometry.ts`
-- `src/components/LabelPreview.tsx`
-- `src/components/PrintSheet.tsx`
-- `src/components/ReprintModal.tsx`
-- `src/lib/queryClient.ts` (keys + helpers)
-
-Edited files:
-- `src/lib/printerCommands.ts`, `src/lib/data.ts`, `src/components/Barcode.tsx`
-- `src/pages/Printers.tsx`, `src/pages/Templates.tsx`
-- `src/pages/ProductionEntry.tsx`, `src/pages/Cartonization.tsx`, `src/pages/ShippingLabel.tsx`
-- `src/pages/DPL.tsx`, `src/pages/DispatchBundle.tsx`
-- `src/pages/Traceability.tsx`, `src/pages/GateScan.tsx`
-- `src/pages/Reprints.tsx`, `src/pages/PrintLogs.tsx`
-
-After each phase I'll smoke-test in the live preview against the existing seeded chain (PL-20260511-9303 → … → SHP-20260511-7665) to confirm nothing regresses.
+- Any DB migration, RLS toggle, anon policy, or schema rename.
+- Visual redesign of cards, navigation, or color tokens.
+- Backend/edge functions — everything stays Supabase-native + frontend.
