@@ -9,6 +9,13 @@ import { processDispatchGateCtnSoScan, type ScanFlowResult } from "@/lib/scanSer
 import { ShieldCheck, ShieldAlert, ScanLine, Volume2, VolumeX } from "lucide-react";
 import { feedback, isFeedbackEnabled, setFeedbackEnabled } from "@/lib/scanFeedback";
 import { toast } from "sonner";
+import { useOlsSession } from "@/hooks/useOlsSession";
+import {
+  submitCentralScan,
+  retryCentralScan,
+  type CentralSubmitResult,
+} from "@/lib/centralSubmit";
+import type { CentralScanSyncStatus } from "@/lib/centralScanStatus";
 
 interface LegacyResult { kind: "green" | "red"; title: string; reason?: string; ref?: string; }
 
@@ -21,6 +28,9 @@ export default function GateScan() {
   const [history, setHistory] = useState<any[]>([]);
   const [legacyResult, setLegacyResult] = useState<LegacyResult | null>(null);
   const [ctnResult, setCtnResult] = useState<ScanFlowResult | null>(null);
+  const [submitResult, setSubmitResult] = useState<CentralSubmitResult | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const { session, canSubmitCentral } = useOlsSession();
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { reload(); inputRef.current?.focus(); }, []);
@@ -82,10 +92,12 @@ export default function GateScan() {
     const kind = classifyCartonBarcode(ref);
     setLegacyResult(null);
     setCtnResult(null);
+    setSubmitResult(null);
 
     if (kind === "central") {
       const flow = await processDispatchGateCtnSoScan(ref, orders);
       setCtnResult(flow);
+      setSubmitResult(null);
       if (flow.duplicate) {
         feedback("dup");
         toast.warning(flow.userMessage);
@@ -117,6 +129,41 @@ export default function GateScan() {
     setScan("");
     reload();
     inputRef.current?.focus();
+  }
+
+
+  const syncStatus: CentralScanSyncStatus =
+    submitResult?.status ?? ctnResult?.centralSyncStatus ?? "preview_only";
+
+  async function handleSubmitCentral() {
+    if (!ctnResult?.payload || !ctnResult.idempotencyKey) return;
+    setSubmitting(true);
+    const r = await submitCentralScan({
+      idempotencyKey: ctnResult.idempotencyKey,
+      payload: ctnResult.payload as unknown as Record<string, unknown>,
+      scanHistoryId: ctnResult.scanHistoryId,
+      session,
+    });
+    setSubmitResult(r);
+    setSubmitting(false);
+    if (r.ok) toast.success(r.message);
+    else if (r.duplicate) toast.warning(r.message);
+    else toast.error(r.message);
+  }
+
+  async function handleRetryCentral() {
+    if (!ctnResult?.payload || !ctnResult.idempotencyKey) return;
+    setSubmitting(true);
+    const r = await retryCentralScan({
+      idempotencyKey: ctnResult.idempotencyKey,
+      payload: ctnResult.payload as unknown as Record<string, unknown>,
+      scanHistoryId: ctnResult.scanHistoryId,
+      session,
+    });
+    setSubmitResult(r);
+    setSubmitting(false);
+    if (r.ok) toast.success(r.message);
+    else toast.error(r.message);
   }
 
   const fastScan = typeof window !== "undefined" && window.matchMedia("(max-width: 640px)").matches;
@@ -176,10 +223,22 @@ export default function GateScan() {
           </div>
 
           <CentralPayloadPreview
+            title="Central dispatch_gate payload"
             payload={ctnResult?.payload ?? null}
             idempotencyKey={ctnResult?.idempotencyKey}
             readyForCentral={!!ctnResult?.readyForCentral}
             userMessage={ctnResult?.userMessage}
+            syncStatus={syncStatus}
+            canSubmit={canSubmitCentral}
+            submitDisabledReason={
+              !canSubmitCentral ? "Dispatch or security role required (JWT ols_roles)" : undefined
+            }
+            onSubmitToCentral={handleSubmitCentral}
+            onRetry={handleRetryCentral}
+            submitting={submitting}
+            centralReference={submitResult?.centralReference}
+            submittedAt={submitResult?.submittedAt}
+            failureReason={submitResult?.failureReason}
           />
         </div>
 

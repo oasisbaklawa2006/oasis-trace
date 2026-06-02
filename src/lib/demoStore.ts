@@ -71,6 +71,7 @@ function seed(): DB {
     ols_gate_scans: [],
     ols_print_logs: [],
     ols_scan_history: [],
+    ols_central_scan_submissions: [],
     ols_reprint_requests: [],
     ols_audit_logs: [],
     ols_permissions: [],

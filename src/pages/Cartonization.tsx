@@ -15,6 +15,13 @@ import { ScanBarcode, PackagePlus, Printer, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { StatusPill } from "@/components/StatusPill";
 import { feedback } from "@/lib/scanFeedback";
+import { useOlsSession } from "@/hooks/useOlsSession";
+import {
+  submitCentralScan,
+  retryCentralScan,
+  type CentralSubmitResult,
+} from "@/lib/centralSubmit";
+import type { CentralScanSyncStatus } from "@/lib/centralScanStatus";
 
 export default function Cartonization() {
   const [orders, setOrders] = useState<any[]>([]);
@@ -26,6 +33,9 @@ export default function Cartonization() {
   const [scanInput, setScanInput] = useState("");
   const [identityScan, setIdentityScan] = useState("");
   const [identityResult, setIdentityResult] = useState<ScanFlowResult | null>(null);
+  const [submitResult, setSubmitResult] = useState<CentralSubmitResult | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const { session, canSubmitCentral } = useOlsSession();
   const [recentCartons, setRecentCartons] = useState<any[]>([]);
 
   const barcodeDisplay = carton
@@ -60,6 +70,7 @@ export default function Cartonization() {
     setCarton(c);
     setContents([]);
     setIdentityResult(null);
+    setSubmitResult(null);
     const display = resolveCartonBarcodeDisplay(orderRef, legacyNo, metadata);
     if (display.centralBarcode) {
       toast.success(`Carton started · Central barcode ${display.centralBarcode}`);
@@ -73,6 +84,7 @@ export default function Cartonization() {
     if (!code || !carton) return;
     const flow = await processCartonIdentityScan(code, carton.order_ref, orders);
     setIdentityResult(flow);
+    setSubmitResult(null);
     if (flow.duplicate) {
       feedback("dup");
       toast.warning(flow.userMessage);
@@ -121,6 +133,41 @@ export default function Cartonization() {
     toast.success("Carton packed & label printed");
     setCarton(null); setContents([]); setIdentityResult(null);
     setRecentCartons(await listTable("ols_cartons", { order: "created_at", limit: 6 }));
+  }
+
+
+  const identitySyncStatus: CentralScanSyncStatus =
+    submitResult?.status ?? identityResult?.centralSyncStatus ?? "preview_only";
+
+  async function handleSubmitCentral() {
+    if (!identityResult?.payload || !identityResult.idempotencyKey) return;
+    setSubmitting(true);
+    const r = await submitCentralScan({
+      idempotencyKey: identityResult.idempotencyKey,
+      payload: identityResult.payload as unknown as Record<string, unknown>,
+      scanHistoryId: identityResult.scanHistoryId,
+      session,
+    });
+    setSubmitResult(r);
+    setSubmitting(false);
+    if (r.ok) toast.success(r.message);
+    else if (r.duplicate) toast.warning(r.message);
+    else toast.error(r.message);
+  }
+
+  async function handleRetryCentral() {
+    if (!identityResult?.payload || !identityResult.idempotencyKey) return;
+    setSubmitting(true);
+    const r = await retryCentralScan({
+      idempotencyKey: identityResult.idempotencyKey,
+      payload: identityResult.payload as unknown as Record<string, unknown>,
+      scanHistoryId: identityResult.scanHistoryId,
+      session,
+    });
+    setSubmitResult(r);
+    setSubmitting(false);
+    if (r.ok) toast.success(r.message);
+    else toast.error(r.message);
   }
 
   const fastScan = typeof window !== "undefined" && window.matchMedia("(max-width: 640px)").matches;
@@ -182,11 +229,22 @@ export default function Cartonization() {
                     <Button onClick={verifyCartonIdentity} variant="secondary"><ScanBarcode size={16} /></Button>
                   </div>
                   <CentralPayloadPreview
-                    title="Carton identity payload (preview only)"
+                    title="Central carton identity payload"
                     payload={identityResult?.payload ?? null}
                     idempotencyKey={identityResult?.idempotencyKey}
                     readyForCentral={!!identityResult?.readyForCentral}
                     userMessage={identityResult?.userMessage}
+                    syncStatus={identitySyncStatus}
+                    canSubmit={canSubmitCentral}
+                    submitDisabledReason={
+                      !canSubmitCentral ? "Dispatch or security role required (JWT ols_roles)" : undefined
+                    }
+                    onSubmitToCentral={handleSubmitCentral}
+                    onRetry={handleRetryCentral}
+                    submitting={submitting}
+                    centralReference={submitResult?.centralReference}
+                    submittedAt={submitResult?.submittedAt}
+                    failureReason={submitResult?.failureReason}
                   />
                 </div>
               )}

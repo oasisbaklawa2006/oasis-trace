@@ -8,6 +8,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { insertRow } from "@/lib/data";
 import { toast } from "sonner";
 import { AlertTriangle, ShieldCheck } from "lucide-react";
+import { useOlsSession } from "@/hooks/useOlsSession";
+import { supabaseConfigured } from "@/lib/supabase";
 import {
   canOverride, createPendingRequest, getReprintCount, requiresApproval,
   type ReprintRefType,
@@ -50,8 +52,9 @@ export function ReprintModal({ open, onOpenChange, refType, refId, refLabel, onC
     getReprintCount(refType, refId).then(setPriorCount).catch(() => setPriorCount(0));
   }, [open, refType, refId]);
 
+  const { canApproveReprint } = useOlsSession();
   const needsApproval = requiresApproval(priorCount);
-  const overrideAllowed = canOverride();
+  const overrideAllowed = supabaseConfigured ? canApproveReprint : canOverride();
 
   async function confirm() {
     setBusy(true);

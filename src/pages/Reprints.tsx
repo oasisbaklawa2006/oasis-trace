@@ -14,6 +14,8 @@ import {
   approveRequest, rejectRequest, parseReason, canApprove, getRole, setRole,
   type ReprintRow, type ReprintStatus, type Role,
 } from "@/lib/reprintPolicy";
+import { useOlsSession } from "@/hooks/useOlsSession";
+import { supabaseConfigured } from "@/lib/supabase";
 import { toast } from "sonner";
 
 export default function Reprints() {
@@ -21,6 +23,8 @@ export default function Reprints() {
   const [tab, setTab] = useState<ReprintStatus | "all">("pending");
   const [decision, setDecision] = useState<{ row: ReprintRow; action: "approve" | "reject" } | null>(null);
   const [role, setRoleState] = useState<Role>(getRole());
+  const { canApproveReprint: canApproveJwt } = useOlsSession();
+  const userCanApprove = supabaseConfigured ? canApproveJwt : canApprove();
 
   async function reload() {
     setRows(await listTable<ReprintRow>("ols_reprint_requests", { order: "created_at" }));
@@ -54,7 +58,7 @@ export default function Reprints() {
               <SelectItem value="admin">Admin</SelectItem>
             </SelectContent>
           </Select>
-          {canApprove() && <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary"><ShieldCheck size={10} /> Can approve</span>}
+          {userCanApprove && <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary"><ShieldCheck size={10} /> Can approve</span>}
         </div>
       </div>
 
@@ -97,7 +101,7 @@ export default function Reprints() {
                           <td className="px-3 py-2 text-xs">{p.override ? <span className="rounded bg-warning/15 px-1.5 py-0.5 text-warning-foreground">override</span> : "—"}</td>
                           <td className="px-3 py-2"><StatusPill status={r.status} /></td>
                           <td className="px-3 py-2 text-right">
-                            {r.status === "pending" && canApprove() ? (
+                            {r.status === "pending" && userCanApprove ? (
                               <div className="flex justify-end gap-1">
                                 <Button size="sm" variant="outline" onClick={() => setDecision({ row: r, action: "approve" })}><Check size={14} className="mr-1" /> Approve</Button>
                                 <Button size="sm" variant="ghost" onClick={() => setDecision({ row: r, action: "reject" })}><X size={14} className="mr-1" /> Reject</Button>
