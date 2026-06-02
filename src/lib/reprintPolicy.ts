@@ -66,33 +66,40 @@ export function requiresApproval(priorReprints: number): boolean {
   return priorReprints >= 1;
 }
 
-// ---------- Local "role" architecture (TEMPORARY STUB) ----------
-// TODO(security): replace localStorage role model with authenticated RBAC
-//   sourced from a dedicated `ols_user_roles` table + Supabase JWT claims.
-//   This stub is for development/demo ONLY and MUST NOT ship to production:
-//   any client can set `localStorage.ols_role = "admin"` and bypass approval.
-//   Production must:
-//     - read role from authenticated session (auth.uid → user_roles)
-//     - enforce approval server-side via RLS / RPC
-//     - never trust client-derived role for printing or override decisions
+// ---------- Role checks (Sprint 3) ----------
+// Production: JWT `app_metadata.ols_roles` via `canApproveReprint(session)`.
+// Demo-only: localStorage `ols_role` when Supabase auth is not configured.
+import { supabase, supabaseConfigured } from "@/lib/supabase";
+import { canApproveReprint, getDemoFallbackRoles } from "@/lib/roles";
+
 const ROLE_KEY = "ols_role";
 export type Role = "operator" | "supervisor" | "admin";
 
 export function getRole(): Role {
-  // TODO(security): swap for server-validated role from Supabase auth.
+  if (supabaseConfigured) return "operator";
   if (typeof localStorage === "undefined") return "operator";
   const r = (localStorage.getItem(ROLE_KEY) || "operator") as Role;
   return r === "supervisor" || r === "admin" ? r : "operator";
 }
 export function setRole(r: Role) {
-  // TODO(security): remove once server-side RBAC is wired.
+  if (supabaseConfigured) return;
   try { localStorage.setItem(ROLE_KEY, r); } catch { /* ignore */ }
 }
+
+export async function canApproveAsync(): Promise<boolean> {
+  if (supabaseConfigured && supabase) {
+    const { data } = await supabase.auth.getSession();
+    return canApproveReprint(data.session);
+  }
+  return getDemoFallbackRoles().includes("admin") || getRole() === "admin";
+}
+
 export function canOverride(): boolean {
-  // TODO(security): authoritative check must happen server-side.
+  if (supabaseConfigured) return false;
   const r = getRole();
   return r === "supervisor" || r === "admin";
 }
+/** @deprecated Use canApproveAsync() for Supabase-authenticated apps. */
 export function canApprove(): boolean { return canOverride(); }
 
 // ---------- State machine ----------

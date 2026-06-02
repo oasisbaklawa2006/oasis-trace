@@ -1,6 +1,6 @@
 /**
  * Scan flow orchestration — CTN-SO verification, Central payload build,
- * idempotency guard, local scan history (no Central submit).
+ * idempotency guard, local scan history, ready_to_submit status.
  */
 import { listTable, insertRow } from "@/lib/data";
 import {
@@ -26,8 +26,10 @@ export interface ScanFlowResult {
   userMessage: string;
   messageCode?: ScanMessageCode;
   idempotencyKey?: string;
+  scanHistoryId?: string;
   payload?: CentralDispatchGateScanPayload | CentralCartonIdentityScanPayload;
   readyForCentral: boolean;
+  centralSyncStatus?: "ready_to_submit" | "preview_only";
   duplicate?: boolean;
   recorded?: boolean;
 }
@@ -48,8 +50,9 @@ async function recordCentralScanEvent(opts: {
   payload?: CentralDispatchGateScanPayload | CentralCartonIdentityScanPayload;
   messageCode?: ScanMessageCode;
   userMessage?: string;
-}) {
-  await insertRow("ols_scan_history", {
+  syncStatus?: "preview_only" | "ready_to_submit";
+}): Promise<string | undefined> {
+  const row = await insertRow<{ id: string }>("ols_scan_history", {
     scan_value: opts.scan_value,
     scan_context: opts.scan_context,
     result: opts.result,
@@ -58,9 +61,10 @@ async function recordCentralScanEvent(opts: {
       central_payload: opts.payload ?? null,
       message_code: opts.messageCode ?? null,
       user_message: opts.userMessage ?? null,
-      central_sync_status: "preview_only",
+      central_sync_status: opts.syncStatus ?? (opts.result === "green" ? "ready_to_submit" : "preview_only"),
     },
   });
+  return row?.id;
 }
 
 export async function processDispatchGateCtnSoScan(
@@ -125,7 +129,7 @@ export async function processDispatchGateCtnSoScan(
     verification_status: "verified",
   });
 
-  await recordCentralScanEvent({
+  const scanHistoryId = await recordCentralScanEvent({
     scan_value: match.scanned,
     scan_context: "gate_ctn_so",
     result: "green",
@@ -133,12 +137,13 @@ export async function processDispatchGateCtnSoScan(
     payload,
     messageCode: "gate_scan_verified",
     userMessage: getScanUserMessage("gate_scan_verified"),
+    syncStatus: "ready_to_submit",
   });
 
   await insertRow("ols_gate_scans", {
     qr_ref: match.scanned,
     result: "green",
-    reason: "CTN-SO gate verified (Central payload preview)",
+    reason: "CTN-SO gate verified — ready for Central submit",
   });
 
   return {
@@ -146,8 +151,10 @@ export async function processDispatchGateCtnSoScan(
     userMessage: getScanUserMessage("gate_scan_verified"),
     messageCode: "gate_scan_verified",
     idempotencyKey,
+    scanHistoryId,
     payload,
     readyForCentral: true,
+    centralSyncStatus: "ready_to_submit",
     recorded: true,
   };
 }
@@ -232,7 +239,7 @@ export async function processCartonIdentityScan(
     verification_status: "verified",
   });
 
-  await recordCentralScanEvent({
+  const scanHistoryId = await recordCentralScanEvent({
     scan_value: match.scanned,
     scan_context: "carton_identity",
     result: "green",
@@ -240,6 +247,7 @@ export async function processCartonIdentityScan(
     payload,
     messageCode: "carton_identity_verified",
     userMessage: getScanUserMessage("carton_identity_verified"),
+    syncStatus: "ready_to_submit",
   });
 
   return {
@@ -247,8 +255,10 @@ export async function processCartonIdentityScan(
     userMessage: getScanUserMessage("carton_identity_verified"),
     messageCode: "carton_identity_verified",
     idempotencyKey,
+    scanHistoryId,
     payload,
     readyForCentral: true,
+    centralSyncStatus: "ready_to_submit",
     recorded: true,
   };
 }

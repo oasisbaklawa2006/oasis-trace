@@ -19,7 +19,9 @@ vi.mock("@/lib/data", () => ({
   }),
   insertRow: vi.fn(async (table: string, row: any) => {
     if (table === "ols_scan_history") {
-      mockState.scanHistory.push({ id: crypto.randomUUID(), ...row });
+      const full = { id: crypto.randomUUID(), ...row };
+      mockState.scanHistory.push(full);
+      return full;
     }
     return row;
   }),
