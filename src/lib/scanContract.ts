@@ -1,17 +1,22 @@
 /**
- * Central-compatible scan contract helpers (Sprint 1 — readiness only).
- * Full connector integration is deferred to a later sprint.
+ * Central-compatible scan contract helpers.
+ * Sprint 2: CTN-SO + legacy CTN-YYYYMMDD-#### classification.
  */
 
 export const SOURCE_APP = "barcode_app" as const;
 export const CARTON_ORDER_BARCODE_PREFIX = "CTN-";
 
-/** Order numbers accepted for CTN-SO barcodes (e.g. SO-2026-000136). */
-const ORDER_NUMBER_RE = /^SO-\d{4}-\d{6}$/;
+/** Matches SO-2026-0001 (demo) and SO-2026-000136 (production). */
+export const ORDER_NUMBER_RE = /^SO-\d{4}-\d{4,6}$/;
+
+/** Legacy local carton IDs: CTN-YYYYMMDD-#### */
+export const LEGACY_CTN_RE = /^CTN-\d{8}-\d{4}$/;
 
 export type VerificationStatus = "verified" | "mismatch" | "rejected";
 export type ScanType = "dispatch_gate" | "carton";
 export type VerificationType = "gate_check" | "identity_match";
+export type CartonBarcodeMode = "central" | "legacy";
+export type CartonBarcodeKind = "central" | "legacy" | "invalid";
 
 export interface CentralDispatchGateScanPayload {
   source_app: typeof SOURCE_APP;
@@ -36,7 +41,36 @@ export interface CentralCartonIdentityScanPayload {
   barcode_value: string;
   expected_barcode?: string;
   verification_status: VerificationStatus;
-  scan_source?: "barcode_app_carton_scan";
+  scan_source: "barcode_app_carton_scan";
+}
+
+export type ScanMessageCode =
+  | "gate_scan_verified"
+  | "carton_identity_verified"
+  | "wrong_carton_for_order"
+  | "order_not_found"
+  | "barcode_format_invalid"
+  | "scan_already_recorded";
+
+export const SCAN_USER_MESSAGES: Record<ScanMessageCode, string> = {
+  gate_scan_verified: "Gate scan verified",
+  carton_identity_verified: "Carton identity verified",
+  wrong_carton_for_order: "Wrong carton for this order",
+  order_not_found: "Order not found",
+  barcode_format_invalid: "Barcode format invalid",
+  scan_already_recorded: "Scan already recorded",
+};
+
+export function getScanUserMessage(code: ScanMessageCode): string {
+  return SCAN_USER_MESSAGES[code];
+}
+
+export function isValidOrderNumber(orderNumber: string): boolean {
+  return ORDER_NUMBER_RE.test(orderNumber.trim().toUpperCase());
+}
+
+export function supportsCentralBarcode(orderNumber: string): boolean {
+  return isValidOrderNumber(orderNumber);
 }
 
 /** Build carton barcode from sales order number: SO-2026-000136 → CTN-SO-2026-000136 */
@@ -64,6 +98,23 @@ export function parseCartonOrderBarcode(barcode: string): ParsedCartonOrderBarco
   const orderNumber = raw.slice(CARTON_ORDER_BARCODE_PREFIX.length);
   const valid = ORDER_NUMBER_RE.test(orderNumber);
   return { valid, orderNumber: valid ? orderNumber : null, barcode: raw };
+}
+
+export interface ParsedLegacyCartonBarcode {
+  valid: boolean;
+  barcode: string;
+}
+
+export function parseLegacyCartonBarcode(barcode: string): ParsedLegacyCartonBarcode {
+  const raw = barcode.trim().toUpperCase();
+  return { valid: LEGACY_CTN_RE.test(raw), barcode: raw };
+}
+
+export function classifyCartonBarcode(barcode: string): CartonBarcodeKind {
+  const raw = barcode.trim().toUpperCase();
+  if (parseCartonOrderBarcode(raw).valid) return "central";
+  if (LEGACY_CTN_RE.test(raw)) return "legacy";
+  return "invalid";
 }
 
 export interface BarcodeMatchResult {
@@ -108,7 +159,7 @@ export function scanIdempotencyKey(
   return parts.join("|");
 }
 
-/** Build dispatch_gate payload shape for Central (not yet emitted by GateScan UI). */
+/** Build dispatch_gate payload shape for Central. */
 export function buildDispatchGateScanPayload(opts: {
   order_id: string;
   order_number: string;
@@ -137,6 +188,7 @@ export function buildCartonIdentityScanPayload(opts: {
   order_number?: string;
   barcode_value: string;
   expected_barcode?: string;
+  verification_status?: VerificationStatus;
 }): CentralCartonIdentityScanPayload {
   const expected = opts.expected_barcode ?? opts.barcode_value;
   const verification = verifyCartonBarcodeMatch(opts.barcode_value, expected);
@@ -149,7 +201,7 @@ export function buildCartonIdentityScanPayload(opts: {
     entity_type: "order",
     barcode_value: verification.scanned,
     expected_barcode: verification.expected,
-    verification_status: verification.verification_status,
+    verification_status: opts.verification_status ?? verification.verification_status,
     scan_source: "barcode_app_carton_scan",
   };
 }
