@@ -4,8 +4,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { CentralPayloadPreview } from "@/components/CentralPayloadPreview";
 import { listTable, insertRow, updateRow } from "@/lib/data";
 import { num } from "@/lib/numbering";
+import { buildCartonMetadata, resolveCartonBarcodeDisplay } from "@/lib/barcodeCarton";
+import { supportsCentralBarcode } from "@/lib/scanContract";
+import { processCartonIdentityScan, type ScanFlowResult } from "@/lib/scanService";
 import { LabelPreview } from "@/components/LabelPreview";
 import { ScanBarcode, PackagePlus, Printer, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
@@ -20,7 +24,15 @@ export default function Cartonization() {
   const [carton, setCarton] = useState<any | null>(null);
   const [contents, setContents] = useState<any[]>([]);
   const [scanInput, setScanInput] = useState("");
+  const [identityScan, setIdentityScan] = useState("");
+  const [identityResult, setIdentityResult] = useState<ScanFlowResult | null>(null);
   const [recentCartons, setRecentCartons] = useState<any[]>([]);
+
+  const barcodeDisplay = carton
+    ? resolveCartonBarcodeDisplay(carton.order_ref, carton.carton_no, carton.metadata)
+    : orderRef
+      ? resolveCartonBarcodeDisplay(orderRef, undefined, supportsCentralBarcode(orderRef) ? { central_barcode: undefined } : undefined)
+      : null;
 
   useEffect(() => { (async () => {
     setOrders(await listTable("ols_orders_cache"));
@@ -34,17 +46,44 @@ export default function Cartonization() {
   async function startCarton() {
     if (!orderRef) { toast.error("Pick an order first"); return; }
     const order = orders.find(o => o.order_number === orderRef);
+    const legacyNo = num.carton();
+    const metadata = buildCartonMetadata(orderRef, legacyNo);
     const c = await insertRow<any>("ols_cartons", {
-      carton_no: num.carton(),
+      carton_no: legacyNo,
       order_ref: orderRef,
       customer_code: order?.customer_code,
       customer_name: order?.customer_name,
       status: "draft",
       carton_index: (recentCartons.filter(r => r.order_ref === orderRef).length) + 1,
+      metadata,
     });
     setCarton(c);
     setContents([]);
-    toast.success(`Carton ${c.carton_no} created`);
+    setIdentityResult(null);
+    const display = resolveCartonBarcodeDisplay(orderRef, legacyNo, metadata);
+    if (display.centralBarcode) {
+      toast.success(`Carton started · Central barcode ${display.centralBarcode}`);
+    } else {
+      toast.success(`Carton ${legacyNo} created (legacy/local barcode)`);
+    }
+  }
+
+  async function verifyCartonIdentity() {
+    const code = identityScan.trim();
+    if (!code || !carton) return;
+    const flow = await processCartonIdentityScan(code, carton.order_ref, orders);
+    setIdentityResult(flow);
+    if (flow.duplicate) {
+      feedback("dup");
+      toast.warning(flow.userMessage);
+    } else if (flow.ok) {
+      feedback("ok");
+      toast.success(flow.userMessage);
+    } else {
+      feedback("error");
+      toast.error(flow.userMessage);
+    }
+    setIdentityScan("");
   }
 
   async function scanLabel() {
@@ -66,15 +105,21 @@ export default function Cartonization() {
 
   async function finalizeCarton() {
     if (!carton || contents.length === 0) { toast.error("Add at least one label"); return; }
+    if (supportsCentralBarcode(carton.order_ref) && !identityResult?.ok) {
+      toast.error("Verify Central carton identity first", {
+        description: "Scan the CTN-SO barcode before packing.",
+      });
+      return;
+    }
     const net = contents.reduce((s, c) => s + (c.label?.net_weight || 0), 0);
     const gross = contents.reduce((s, c) => s + (c.label?.gross_weight || 0), 0);
-    const updated = await updateRow("ols_cartons", carton.id, {
+    await updateRow("ols_cartons", carton.id, {
       status: "packed", packed_at: new Date().toISOString(),
       net_weight: net, gross_weight: gross,
     });
     await insertRow("ols_print_logs", { ref_type: "carton", ref_id: carton.id, success: true });
     toast.success("Carton packed & label printed");
-    setCarton(null); setContents([]);
+    setCarton(null); setContents([]); setIdentityResult(null);
     setRecentCartons(await listTable("ols_cartons", { order: "created_at", limit: 6 }));
   }
 
@@ -84,7 +129,7 @@ export default function Cartonization() {
       <PageHeader
         eyebrow="Dispatch"
         title="Cartonization & Packing"
-        description="Scan production labels into a carton. Each label can only live in one active carton."
+        description="Verify CTN-SO carton identity, then scan production labels into the carton."
       />
 
       <div className="grid gap-6 lg:grid-cols-5">
@@ -111,9 +156,40 @@ export default function Cartonization() {
                   <p className="ols-section-title">Active carton</p>
                   <p className="font-mono text-lg font-semibold">{carton.carton_no}</p>
                   <p className="text-xs text-muted-foreground">{carton.order_ref} · {carton.customer_name}</p>
+                  {barcodeDisplay?.centralBarcode && (
+                    <p className="mt-1 font-mono text-xs text-primary">
+                      Central barcode: {barcodeDisplay.centralBarcode}
+                    </p>
+                  )}
+                  <p className="font-mono text-[11px] text-muted-foreground">
+                    Legacy/local barcode: {barcodeDisplay?.legacyBarcode || carton.carton_no}
+                  </p>
                 </div>
                 <StatusPill status="draft" />
               </div>
+
+              {supportsCentralBarcode(carton.order_ref) && (
+                <div className="mt-4 rounded-lg border border-dashed p-3">
+                  <p className="ols-section-title mb-2">Carton identity (CTN-SO)</p>
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="Scan CTN-SO order barcode…"
+                      value={identityScan}
+                      onChange={e => setIdentityScan(e.target.value)}
+                      onKeyDown={e => e.key === "Enter" && verifyCartonIdentity()}
+                      className="font-mono"
+                    />
+                    <Button onClick={verifyCartonIdentity} variant="secondary"><ScanBarcode size={16} /></Button>
+                  </div>
+                  <CentralPayloadPreview
+                    title="Carton identity payload (preview only)"
+                    payload={identityResult?.payload ?? null}
+                    idempotencyKey={identityResult?.idempotencyKey}
+                    readyForCentral={!!identityResult?.readyForCentral}
+                    userMessage={identityResult?.userMessage}
+                  />
+                </div>
+              )}
 
               <div className="mt-4 flex gap-2">
                 <Input
@@ -122,7 +198,7 @@ export default function Cartonization() {
                   onChange={e => setScanInput(e.target.value)}
                   onKeyDown={e => e.key === "Enter" && scanLabel()}
                   className="font-mono"
-                  autoFocus
+                  autoFocus={!supportsCentralBarcode(carton.order_ref)}
                 />
                 <Button onClick={scanLabel}><ScanBarcode size={16} /></Button>
               </div>
@@ -160,14 +236,17 @@ export default function Cartonization() {
                 `Order ${carton?.order_ref || "—"}`,
                 `Carton ${carton?.carton_index ?? "—"} · Items ${contents.length}`,
                 `Net ${contents.reduce((s, c) => s + (c.label?.net_weight || 0), 0).toFixed(2)} kg`,
+                barcodeDisplay?.centralBarcode
+                  ? `Central ${barcodeDisplay.centralBarcode}`
+                  : `Legacy ${barcodeDisplay?.legacyBarcode || "—"}`,
               ]}
-              barcode={carton?.carton_no || "CTN-PREVIEW-0001"}
+              barcode={barcodeDisplay?.labelBarcode || "CTN-PREVIEW-0001"}
             />
           </div>
 
           <div className="mt-5 flex items-start gap-2 rounded-xl bg-warning/10 p-3 text-xs text-warning-foreground/80">
             <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-            Duplicate scans are blocked. Manual override requires a reason and is audit-logged.
+            Central orders require CTN-SO identity verification before pack. Legacy orders use local CTN-YYYYMMDD IDs only.
           </div>
         </div>
       </div>
@@ -180,18 +259,22 @@ export default function Cartonization() {
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead className="text-left text-xs uppercase tracking-wider text-muted-foreground">
-                <tr><th className="px-3 py-2">Carton</th><th className="px-3 py-2">Order</th><th className="px-3 py-2">Customer</th><th className="px-3 py-2">Net</th><th className="px-3 py-2">Status</th></tr>
+                <tr><th className="px-3 py-2">Carton</th><th className="px-3 py-2">Central</th><th className="px-3 py-2">Order</th><th className="px-3 py-2">Customer</th><th className="px-3 py-2">Net</th><th className="px-3 py-2">Status</th></tr>
               </thead>
               <tbody>
-                {recentCartons.map(c => (
-                  <tr key={c.id} className="border-t">
-                    <td className="px-3 py-2 font-mono text-xs">{c.carton_no}</td>
-                    <td className="px-3 py-2">{c.order_ref}</td>
-                    <td className="px-3 py-2">{c.customer_name}</td>
-                    <td className="px-3 py-2">{c.net_weight?.toFixed?.(2) || "—"} kg</td>
-                    <td className="px-3 py-2"><StatusPill status={c.status} /></td>
-                  </tr>
-                ))}
+                {recentCartons.map(c => {
+                  const d = resolveCartonBarcodeDisplay(c.order_ref, c.carton_no, c.metadata);
+                  return (
+                    <tr key={c.id} className="border-t">
+                      <td className="px-3 py-2 font-mono text-xs">{c.carton_no}</td>
+                      <td className="px-3 py-2 font-mono text-[10px]">{d.centralBarcode || "—"}</td>
+                      <td className="px-3 py-2">{c.order_ref}</td>
+                      <td className="px-3 py-2">{c.customer_name}</td>
+                      <td className="px-3 py-2">{c.net_weight?.toFixed?.(2) || "—"} kg</td>
+                      <td className="px-3 py-2"><StatusPill status={c.status} /></td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
