@@ -1,0 +1,38 @@
+name: Repo Ownership Boundaries
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  check-boundaries:
+    name: Enforce oasis-trace repo ownership boundaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Full history so BOUNDARY_BASE_REF (a PR base sha or pre-push sha,
+          # set below) is always resolvable, and so the script can diff
+          # against it to tell new schema/migration additions apart from
+          # pre-existing legacy debt.
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Check repo ownership boundaries
+        env:
+          # On a push event, actions/checkout has already moved `main` to the
+          # pushed commit, so diffing against origin/main (this script's local
+          # fallback) would always be empty. Pass the actual base explicitly:
+          # the PR's base sha for pull_request, the pre-push sha for push.
+          BOUNDARY_BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: npm run check:boundaries
