@@ -120,33 +120,44 @@ file_has_ddl() {
 # origin/main diff that would report zero new violations no matter what
 # changed.
 #
-# Two cases are explicitly NOT "a base that should resolve but didn't" — both
-# fall back to the same local-fallback path (try origin/main; warn, don't
-# fail, if even that can't be resolved; skip tracked-diff checks either way):
+# Three distinct cases, handled separately (do not collapse the all-zero
+# case into the "unset" case — they must NOT behave the same):
 #   - BOUNDARY_BASE_REF unset/empty — local/dev run, or a CI trigger with no
-#     natural base (e.g. workflow_dispatch).
+#     natural base (e.g. workflow_dispatch). Falls back to origin/main if
+#     resolvable; warns and skips tracked-diff checks if not.
 #   - BOUNDARY_BASE_REF is the all-zero sha. GitHub sets github.event.before
 #     to this on a push event with no prior commit to point at (creating a
 #     branch, or main's very first push) — there is genuinely no "before"
-#     commit to diff against.
-# Either way, the untracked-file checks below run regardless of any of this
-# — they need no base at all.
+#     commit to diff against. This means "no reliable tracked base exists",
+#     NOT "no base was specified" — falling back to origin/main here would
+#     silently diff against an unrelated/same-commit base and either miss
+#     real violations or report phantom ones. HAVE_BASE stays 0 and BASE_REF
+#     is never set to origin/main for this run; only base-independent checks
+#     (the untracked-file scan above) apply.
+#   - BOUNDARY_BASE_REF is non-empty, non-zero, and doesn't resolve — a real
+#     checkout/history problem. Fails loudly (exit 1).
+# Either way, the untracked-file checks above already ran regardless of any
+# of this — they need no base at all.
 ALL_ZERO_SHA_RE='^0+$'
 HAVE_BASE=0
-if [ -n "${BOUNDARY_BASE_REF:-}" ] && [[ ! "${BOUNDARY_BASE_REF}" =~ $ALL_ZERO_SHA_RE ]]; then
-  BASE_REF="$BOUNDARY_BASE_REF"
-  if git rev-parse --verify --quiet "${BASE_REF}^{commit}" >/dev/null 2>&1; then
-    HAVE_BASE=1
+ZERO_BASE=0
+BASE_REF=""
+if [ -n "${BOUNDARY_BASE_REF:-}" ]; then
+  if [[ "${BOUNDARY_BASE_REF}" =~ $ALL_ZERO_SHA_RE ]]; then
+    echo "WARNING: Boundary base ref is all-zero; tracked diff checks are skipped for this run."
+    ZERO_BASE=1
   else
-    echo "ERROR: BOUNDARY_BASE_REF=\"${BASE_REF}\" was provided but could not be resolved to a commit."
-    echo "This usually means the checkout did not fetch enough history (actions/checkout needs fetch-depth: 0) or the base sha is invalid."
-    echo "Failing loudly instead of silently skipping the diff-based boundary checks — see docs/repo-ownership-guardrails.md."
-    exit 1
+    BASE_REF="$BOUNDARY_BASE_REF"
+    if git rev-parse --verify --quiet "${BASE_REF}^{commit}" >/dev/null 2>&1; then
+      HAVE_BASE=1
+    else
+      echo "ERROR: BOUNDARY_BASE_REF=\"${BASE_REF}\" was provided but could not be resolved to a commit."
+      echo "This usually means the checkout did not fetch enough history (actions/checkout needs fetch-depth: 0) or the base sha is invalid."
+      echo "Failing loudly instead of silently skipping the diff-based boundary checks — see docs/repo-ownership-guardrails.md."
+      exit 1
+    fi
   fi
 else
-  if [ -n "${BOUNDARY_BASE_REF:-}" ]; then
-    echo "WARNING: Boundary base ref is all-zero; tracked diff checks are skipped for this run."
-  fi
   BASE_REF="origin/main"
   if git rev-parse --verify --quiet "${BASE_REF}^{commit}" >/dev/null 2>&1; then
     HAVE_BASE=1
@@ -211,48 +222,118 @@ if [ "$HAVE_BASE" -eq 1 ]; then
   # repo diff (no pathspec — restricting up front can suppress rename
   # pairing against a source path outside it) with rename/copy detection on,
   # then classify every row ourselves:
-  #   - A/T rows have one path column: that path IS the new/changed file.
-  #   - R/C rows have two path columns (old, new): the DESTINATION (new)
-  #     path is what matters — a rename is checked against where the file
-  #     ends up, not where it used to live.
+  #   - A/T rows have one path column: that path IS the new/changed file —
+  #     always treated as newly introduced, hard-fail policy applies.
+  #   - R/C rows have two path columns (old, new). The DESTINATION is what
+  #     ownership check applies (a rename is checked against where the file
+  #     ends up, not where it used to live) — BUT a rename/copy of a file
+  #     that was ALREADY a tracked legacy backend file at the base is not
+  #     "new" ownership, just the same pre-existing legacy content moving —
+  #     so it must stay warning-only, exactly like editing it in place would.
+  #     Moving a NON-backend source (src/foo.ts, docs/example.sql, ...) into
+  #     a backend location IS new ownership and still hard-fails. This is
+  #     checked with `git cat-file -e "${BASE_REF}:${source}"` — does that
+  #     exact path exist as a blob in the base commit? — not just "was this
+  #     row classified as a rename", since that alone doesn't tell us the
+  #     source was itself already backend content.
+  #     supabase/migrations/*.sql is held to a stricter version of this rule
+  #     (source must have ALSO already been under supabase/migrations/*.sql,
+  #     not just any legacy backend area) since this repo has no pre-existing
+  #     migrations at all — any migration is new schema ownership unless it
+  #     is unambiguously a rename of another already-tracked migration.
+  source_existed_in_base() {
+    git cat-file -e "${BASE_REF}:${1}" 2>/dev/null
+  }
+  is_legacy_backend_source() {
+    case "$1" in
+      db/*.sql|supabase/functions/*) source_existed_in_base "$1" ;;
+      *) return 1 ;;
+    esac
+  }
+  is_legacy_migration_source() {
+    case "$1" in
+      supabase/migrations/*.sql) source_existed_in_base "$1" ;;
+      *) return 1 ;;
+    esac
+  }
+
   new_migrations=""
   new_functions=""
   new_db_sql=""
+  legacy_moves=""
   while IFS=$'\t' read -r status path1 path2; do
     [ -z "$status" ] && continue
     case "$status" in
-      A*|T*) dest="$path1" ;;
-      R*|C*) dest="$path2" ;;
+      A*|T*)
+        dest="$path1"
+        case "$dest" in
+          supabase/migrations/*.sql) new_migrations="${new_migrations}${dest}"$'\n' ;;
+          supabase/functions/*) new_functions="${new_functions}${dest}"$'\n' ;;
+          db/*.sql) file_has_ddl "$dest" && new_db_sql="${new_db_sql}${dest}"$'\n' ;;
+        esac
+        ;;
+      R*|C*)
+        src="$path1"
+        dest="$path2"
+        case "$dest" in
+          supabase/migrations/*.sql)
+            if is_legacy_migration_source "$src"; then
+              legacy_moves="${legacy_moves}${src} -> ${dest}"$'\n'
+            else
+              new_migrations="${new_migrations}${dest}"$'\n'
+            fi
+            ;;
+          supabase/functions/*)
+            if is_legacy_backend_source "$src"; then
+              legacy_moves="${legacy_moves}${src} -> ${dest}"$'\n'
+            else
+              new_functions="${new_functions}${dest}"$'\n'
+            fi
+            ;;
+          db/*.sql)
+            # Legacy-source visibility must not depend on the destination's
+            # DDL content — a rename/copy of an already-legacy db/ file is
+            # worth noting regardless of what it contains, so it is reported
+            # unconditionally here. A NON-legacy source landing in db/ is
+            # only a hard failure if it actually contains DDL (a stray
+            # non-schema .sql file dropped into db/ isn't itself a
+            # violation, matching the untracked/A-row db/ handling above).
+            if is_legacy_backend_source "$src"; then
+              legacy_moves="${legacy_moves}${src} -> ${dest}"$'\n'
+            elif file_has_ddl "$dest"; then
+              new_db_sql="${new_db_sql}${dest}"$'\n'
+            fi
+            ;;
+        esac
+        ;;
       *) continue ;;
-    esac
-    case "$dest" in
-      supabase/migrations/*.sql) new_migrations="${new_migrations}${dest}"$'\n' ;;
-      supabase/functions/*) new_functions="${new_functions}${dest}"$'\n' ;;
-      db/*.sql) new_db_sql="${new_db_sql}${dest}"$'\n' ;;
     esac
   done < <(git diff --name-status -M -C --diff-filter=ACRT "${BASE_REF}" 2>/dev/null)
   new_migrations="$(printf '%s' "$new_migrations" | grep -v '^$' | sort -u || true)"
   new_functions="$(printf '%s' "$new_functions" | grep -v '^$' | sort -u || true)"
   new_db_sql="$(printf '%s' "$new_db_sql" | grep -v '^$' | sort -u || true)"
+  legacy_moves="$(printf '%s' "$legacy_moves" | grep -v '^$' | sort -u || true)"
 
   if [ -n "$new_migrations" ]; then
-    echo "BOUNDARY VIOLATION: new Supabase migration path(s) introduced (added, renamed, or copied in) — schema ownership belongs to oasis-supabase-core:"
+    echo "BOUNDARY VIOLATION: new Supabase migration path(s) introduced (added, or renamed/copied in from a non-migration source) — schema ownership belongs to oasis-supabase-core:"
     echo "$new_migrations" | sed 's/^/  /'
     violations=$((violations + 1))
   fi
   if [ -n "$new_functions" ]; then
-    echo "BOUNDARY VIOLATION: new Supabase Edge Function path(s) introduced (added, renamed, or copied in) — Edge Function ownership belongs to oasis-supabase-core:"
+    echo "BOUNDARY VIOLATION: new Supabase Edge Function path(s) introduced (added, or renamed/copied in from a non-backend source) — Edge Function ownership belongs to oasis-supabase-core:"
     echo "$new_functions" | sed 's/^/  /'
     violations=$((violations + 1))
   fi
   if [ -n "$new_db_sql" ]; then
-    while IFS= read -r f; do
-      [ -z "$f" ] && continue
-      if file_has_ddl "$f"; then
-        echo "BOUNDARY VIOLATION: new db/ SQL path contains DDL (added, renamed, or copied in) — schema authority belongs to oasis-supabase-core: $f"
-        violations=$((violations + 1))
-      fi
-    done <<< "$new_db_sql"
+    echo "BOUNDARY VIOLATION: new db/ SQL path(s) contain DDL (added, or renamed/copied in from a non-backend source) — schema authority belongs to oasis-supabase-core:"
+    echo "$new_db_sql" | sed 's/^/  /'
+    violations=$((violations + 1))
+  fi
+  if [ -n "$legacy_moves" ]; then
+    count="$(echo "$legacy_moves" | wc -l | tr -d ' ')"
+    echo "NOTE: $count legacy backend file(s) renamed/copied within backend ownership areas — warning only, not a hard failure (see docs/repo-ownership-guardrails.md):"
+    echo "$legacy_moves" | sed 's/^/  /'
+    warnings=$((warnings + 1))
   fi
 
   # Edits to EXISTING legacy db/ or supabase/functions files (same path in
@@ -276,9 +357,11 @@ if [ "$HAVE_BASE" -eq 1 ]; then
     echo "$modified_functions" | sed 's/^/  /'
     warnings=$((warnings + 1))
   fi
-else
+elif [ "$ZERO_BASE" -eq 0 ]; then
   echo "NOTE: base ref \"${BASE_REF}\" not available — skipping tracked-file diff checks (nothing to compare against). Untracked-file checks above still ran."
 fi
+# (When ZERO_BASE=1, the WARNING already printed above explains why tracked-
+# diff checks are skipped this run — no need to repeat it here.)
 
 # ---------------------------------------------------------------------------
 if [ "$violations" -gt 0 ]; then
