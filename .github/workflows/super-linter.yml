@@ -39,6 +39,3 @@ jobs:
           VALIDATE_JSON: true
           VALIDATE_TYPESCRIPT_ES: true
           VALIDATE_YAML: true
-          VALIDATE_MARKDOWN: false
-          VALIDATE_NATURAL_LANGUAGE: false
-          VALIDATE_SQLFLUFF: false
