@@ -20,6 +20,8 @@ export default function DPL() {
   const [dpls, setDpls] = useState<any[]>([]);
   const [active, setActive] = useState<any | null>(null);
   const [activeCartons, setActiveCartons] = useState<any[]>([]);
+  const [dplError, setDplError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => { (async () => {
     setOrders(await listTable("ols_orders_cache"));
@@ -32,30 +34,40 @@ export default function DPL() {
   const cartonsForOrder = cartons.filter(c => c.order_ref === orderRef && c.status === "packed");
 
   async function generateDPL() {
-    if (!orderRef) { toast.error("Pick an order"); return; }
-    if (cartonsForOrder.length === 0) { toast.error("No packed cartons for this order"); return; }
-    const order = orders.find(o => o.order_number === orderRef);
-    const totals = cartonsForOrder.reduce((acc, c) => ({
-      gross: acc.gross + (c.gross_weight || 0),
-      net: acc.net + (c.net_weight || 0),
-    }), { gross: 0, net: 0 });
-    const dpl = await insertRow<any>("ols_dpl_documents", {
-      dpl_no: num.dpl(),
-      order_ref: orderRef,
-      customer_name: order?.customer_name,
-      destination: order?.destination,
-      transport_mode: order?.transport_mode,
-      total_cartons: cartonsForOrder.length,
-      total_gross: totals.gross,
-      total_net: totals.net,
-      status: "open",
-    });
-    for (let i = 0; i < cartonsForOrder.length; i++) {
-      await insertRow("ols_dpl_cartons", { dpl_id: dpl.id, carton_id: cartonsForOrder[i].id, position: i + 1 });
+    try {
+      setDplError(null);
+      if (!orderRef) { toast.error("Pick an order"); return; }
+      if (cartonsForOrder.length === 0) { toast.error("No packed cartons for this order"); return; }
+      setIsSubmitting(true);
+      const order = orders.find(o => o.order_number === orderRef);
+      const totals = cartonsForOrder.reduce((acc, c) => ({
+        gross: acc.gross + (c.gross_weight || 0),
+        net: acc.net + (c.net_weight || 0),
+      }), { gross: 0, net: 0 });
+      const dpl = await insertRow<any>("ols_dpl_documents", {
+        dpl_no: num.dpl(),
+        order_ref: orderRef,
+        customer_name: order?.customer_name,
+        destination: order?.destination,
+        transport_mode: order?.transport_mode,
+        total_cartons: cartonsForOrder.length,
+        total_gross: totals.gross,
+        total_net: totals.net,
+        status: "open",
+      });
+      for (let i = 0; i < cartonsForOrder.length; i++) {
+        await insertRow("ols_dpl_cartons", { dpl_id: dpl.id, carton_id: cartonsForOrder[i].id, position: i + 1 });
+      }
+      setDpls(await listTable("ols_dpl_documents", { order: "created_at" }));
+      openDpl(dpl);
+      toast.success(`DPL ${dpl.dpl_no} created with ${cartonsForOrder.length} cartons`);
+    } catch (err: any) {
+      const msg = err?.message || "Failed to generate DPL";
+      setDplError(msg);
+      toast.error(msg, { duration: Infinity });
+    } finally {
+      setIsSubmitting(false);
     }
-    setDpls(await listTable("ols_dpl_documents", { order: "created_at" }));
-    openDpl(dpl);
-    toast.success(`DPL ${dpl.dpl_no} created with ${cartonsForOrder.length} cartons`);
   }
 
   function openDpl(d: any) {
@@ -96,7 +108,12 @@ export default function DPL() {
             <SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.order_number}>{o.order_number} — {o.customer_name}</SelectItem>)}</SelectContent>
           </Select>
           <p className="mt-2 text-xs text-muted-foreground">{cartonsForOrder.length} packed carton(s) ready</p>
-          <Button onClick={generateDPL} className="mt-3 w-full bg-gradient-primary text-primary-foreground"><FileText size={16} className="mr-1.5" /> Generate DPL</Button>
+          <Button onClick={generateDPL} disabled={isSubmitting} className="mt-3 w-full bg-gradient-primary text-primary-foreground"><FileText size={16} className="mr-1.5" /> Generate DPL</Button>
+          {dplError && (
+            <div className="mt-3 rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+              <strong>DPL error:</strong> {dplError}
+            </div>
+          )}
 
           <div className="mt-6">
             <p className="ols-section-title mb-2">Recent DPLs</p>

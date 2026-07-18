@@ -1,8 +1,11 @@
 // Data layer for OASIS LABEL STUDIO.
-// Tries Supabase first against the live `ols_` tables. On any error (missing
-// table, RLS denial, network) it falls back to the local demo store so the UI
-// never breaks. Adds: timeout, retry-on-network, friendly duplicate handling,
-// online/offline detection.
+// Reads: tries Supabase first. On error (missing table, RLS denial, network),
+// falls back to local demo store so the UI never breaks.
+// Writes: when Supabase env vars are configured, hard-fails on write error
+// instead of silently falling back to localStorage. This prevents silent data
+// loss in production. Explicit demo mode (no env vars) continues using demo
+// store unchanged. Adds: timeout, retry-on-network, friendly duplicate
+// handling, online/offline detection.
 import { supabase, supabaseConfigured } from "./supabase";
 import { demo } from "./demoStore";
 

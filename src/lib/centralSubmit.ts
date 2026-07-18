@@ -66,15 +66,20 @@ async function patchScanHistoryMetadata(
   scanHistoryId: string,
   patch: Record<string, unknown>,
 ): Promise<void> {
-  const rows = await listTable<{ id: string; metadata?: Record<string, unknown> }>(
-    "ols_scan_history",
-    { limit: 1000 },
-  );
-  const row = rows.find(r => r.id === scanHistoryId);
-  if (!row) return;
-  await updateRow("ols_scan_history", scanHistoryId, {
-    metadata: { ...(row.metadata || {}), ...patch },
-  });
+  try {
+    const rows = await listTable<{ id: string; metadata?: Record<string, unknown> }>(
+      "ols_scan_history",
+      { limit: 1000 },
+    );
+    const row = rows.find(r => r.id === scanHistoryId);
+    if (!row) return;
+    await updateRow("ols_scan_history", scanHistoryId, {
+      metadata: { ...(row.metadata || {}), ...patch },
+    });
+  } catch (err: any) {
+    // Log metadata patch failures but don't crash submit flows — the scan may still have been recorded in Central.
+    console.warn(`[ols] Failed to patch scan history metadata for ${scanHistoryId}:`, err?.message);
+  }
 }
 
 async function submitViaEdgeFunction(req: CentralSubmitRequest): Promise<CentralSubmitResult> {

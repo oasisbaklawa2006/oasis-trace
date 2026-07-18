@@ -91,6 +91,7 @@ export default function GateScan() {
       setScanError(msg);
       toast.error(msg, { duration: Infinity });
       feedback("error");
+      throw err;
     }
   }
 
