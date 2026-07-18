@@ -66,7 +66,7 @@ Stored in `ols_scan_history.metadata.central_sync_status` and `ols_central_scan_
 |--------|---------|
 | `SUPABASE_SERVICE_ROLE_KEY` | Idempotency table + optional scan_history patch |
 | `CENTRAL_SCAN_INGEST_URL` | Central ingest endpoint (omit for dry-run) |
-| `CENTRAL_SCAN_SIGNING_SECRET` | HMAC-SHA256 of JSON body → `X-Oasis-Signature` |
+| `CENTRAL_SCAN_SIGNING_SECRET` | HMAC-SHA256 hex of `"<X-Idempotency-Key>\n<raw request body>"` → `X-Oasis-Signature` |
 
 Deploy:
 
@@ -87,9 +87,9 @@ supabase functions deploy submit-central-scan
 | Header | Value |
 |--------|-------|
 | `Content-Type` | `application/json` |
-| `X-Idempotency-Key` | Same as Barcode App idempotency key |
+| `X-Idempotency-Key` | Same Barcode App idempotency key used in the signature input |
 | `X-Source-App` | `barcode_app` |
-| `X-Oasis-Signature` | HMAC-SHA256 hex of raw body (if secret configured) |
+| `X-Oasis-Signature` | HMAC-SHA256 hex of `"<X-Idempotency-Key>\n<raw request body>"`; the newline delimiter is literal and the key must exactly match the `X-Idempotency-Key` header |
 
 **Body:** Sprint 2 payload (`dispatch_gate` or `carton`).
 
