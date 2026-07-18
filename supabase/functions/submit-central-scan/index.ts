@@ -165,7 +165,8 @@ Deno.serve(async (req) => {
       "X-Source-App": "barcode_app",
     };
     if (signingSecret) {
-      headers["X-Oasis-Signature"] = await hmacSha256Hex(signingSecret, bodyStr);
+      const signedMessage = `${idempotency_key}\n${bodyStr}`;
+      headers["X-Oasis-Signature"] = await hmacSha256Hex(signingSecret, signedMessage);
     }
 
     const centralResp = await fetch(centralUrl, {
