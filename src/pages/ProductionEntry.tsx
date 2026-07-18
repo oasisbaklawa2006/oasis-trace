@@ -26,6 +26,8 @@ export default function ProductionEntry() {
     operator_name: "", remarks: "",
   });
   const [lastBatch, setLastBatch] = useState<any[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -44,51 +46,61 @@ export default function ProductionEntry() {
       toast.error("Department, product and net weight are required");
       return;
     }
-    const batch = await insertRow<any>("ols_production_batches", {
-      batch_no: form.batch_no,
-      product_id: form.product_id,
-      department_id: form.department_id,
-      shift: form.shift,
-      mfg_date: form.mfg_date,
-      shelf_life_days: Number(form.shelf_life_days),
-      qc_status: form.qc_status,
-      remarks: form.remarks,
-    });
-    const trayCount = Math.max(1, Number(form.tray_count));
-    const created: any[] = [];
-    for (let i = 0; i < trayCount; i++) {
-      const labelNo = num.productionLabel();
-      const mfg = new Date(form.mfg_date);
-      const best = new Date(mfg); best.setDate(best.getDate() + Number(form.shelf_life_days || 0));
-      const label = await insertRow<any>("ols_production_labels", {
-        label_no: labelNo,
-        batch_id: batch.id,
+    setIsSubmitting(true);
+    setSubmitError(null);
+    try {
+      const batch = await insertRow<any>("ols_production_batches", {
+        batch_no: form.batch_no,
         product_id: form.product_id,
         department_id: form.department_id,
-        tray_serial: `T-${i + 1}`,
-        net_weight: Number(form.net_weight),
-        gross_weight: Number(form.gross_weight || form.net_weight),
+        shift: form.shift,
         mfg_date: form.mfg_date,
-        best_before: best.toISOString().slice(0, 10),
+        shelf_life_days: Number(form.shelf_life_days),
         qc_status: form.qc_status,
-        operator_name: form.operator_name,
-        status: "active",
-        metadata: { product_name: product?.name, sku: product?.sku, department: departments.find(d => d.id === form.department_id)?.name },
+        remarks: form.remarks,
       });
-      await insertRow("ols_stock_units", { production_label_id: label.id, current_location: "store", current_status: "in_stock" });
-      await insertRow("ols_inventory_movements", {
-        production_label_id: label.id, from_location: "production", to_location: "store",
-        movement_type: "production_inward", reference_no: batch.batch_no,
+      const trayCount = Math.max(1, Number(form.tray_count));
+      const created: any[] = [];
+      for (let i = 0; i < trayCount; i++) {
+        const labelNo = num.productionLabel();
+        const mfg = new Date(form.mfg_date);
+        const best = new Date(mfg); best.setDate(best.getDate() + Number(form.shelf_life_days || 0));
+        const label = await insertRow<any>("ols_production_labels", {
+          label_no: labelNo,
+          batch_id: batch.id,
+          product_id: form.product_id,
+          department_id: form.department_id,
+          tray_serial: `T-${i + 1}`,
+          net_weight: Number(form.net_weight),
+          gross_weight: Number(form.gross_weight || form.net_weight),
+          mfg_date: form.mfg_date,
+          best_before: best.toISOString().slice(0, 10),
+          qc_status: form.qc_status,
+          operator_name: form.operator_name,
+          status: "active",
+          metadata: { product_name: product?.name, sku: product?.sku, department: departments.find(d => d.id === form.department_id)?.name },
+        });
+        await insertRow("ols_stock_units", { production_label_id: label.id, current_location: "store", current_status: "in_stock" });
+        await insertRow("ols_inventory_movements", {
+          production_label_id: label.id, from_location: "production", to_location: "store",
+          movement_type: "production_inward", reference_no: batch.batch_no,
+        });
+        await insertRow("ols_print_logs", { ref_type: "production_label", ref_id: label.id, success: true });
+        created.push(label);
+      }
+      setLastBatch(created);
+      setRecent(await listTable("ols_production_labels", { order: "created_at", limit: 8 }));
+      toast.success(`Printed ${created.length} production label${created.length > 1 ? "s" : ""}`, {
+        description: "Stock inward created automatically.",
       });
-      await insertRow("ols_print_logs", { ref_type: "production_label", ref_id: label.id, success: true });
-      created.push(label);
+      setForm(f => ({ ...f, batch_no: num.batch() }));
+    } catch (err: any) {
+      const msg = err?.message || "Failed to save production labels";
+      setSubmitError(msg);
+      toast.error(msg, { duration: Infinity });
+    } finally {
+      setIsSubmitting(false);
     }
-    setLastBatch(created);
-    setRecent(await listTable("ols_production_labels", { order: "created_at", limit: 8 }));
-    toast.success(`Printed ${created.length} production label${created.length > 1 ? "s" : ""}`, {
-      description: "Stock inward created automatically.",
-    });
-    setForm(f => ({ ...f, batch_no: num.batch() }));
   }
 
   return (
@@ -141,8 +153,13 @@ export default function ProductionEntry() {
             <Field label="Remarks" className="md:col-span-2"><Textarea rows={2} value={form.remarks} onChange={e => update("remarks", e.target.value)} /></Field>
           </div>
           <div className="mt-5 flex flex-wrap gap-2">
-            <Button onClick={generate} className="bg-gradient-primary text-primary-foreground shadow-elevated"><Save size={16} className="mr-1.5" /> Generate & Print Labels</Button>
+            <Button onClick={generate} disabled={isSubmitting} className="bg-gradient-primary text-primary-foreground shadow-elevated"><Save size={16} className="mr-1.5" /> Generate & Print Labels</Button>
           </div>
+          {submitError && (
+            <div className="mt-3 rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+              <strong>Save failed:</strong> {submitError}
+            </div>
+          )}
         </div>
 
         <div className="ols-card p-5 lg:col-span-2">

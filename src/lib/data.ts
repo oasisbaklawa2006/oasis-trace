@@ -117,8 +117,10 @@ export async function insertRow<T = any>(table: string, row: Record<string, any>
         const err = new Error("Duplicate entry blocked"); (err as any).code = "23505";
         throw err;
       }
+      // Live mode is configured but write failed: hard error instead of silent fallback
       setMode("demo", e?.message);
-      console.warn(`[ols] insert ${table} fell back to demo:`, e?.message);
+      console.error(`[ols] insert ${table} failed in live mode:`, e?.message);
+      throw new Error(`Cannot save to database: ${e?.message || "Unknown error"}. Check Supabase connection.`);
     }
   }
   return demo.insert(table, row) as T;
@@ -134,7 +136,12 @@ export async function updateRow<T = any>(table: string, id: string, patch: Recor
       });
       setMode("live");
       return data;
-    } catch (e: any) { setMode("demo", e?.message); console.warn(`[ols] update ${table} fell back to demo:`, e?.message); }
+    } catch (e: any) {
+      // Live mode is configured but write failed: hard error instead of silent fallback
+      setMode("demo", e?.message);
+      console.error(`[ols] update ${table} failed in live mode:`, e?.message);
+      throw new Error(`Cannot save to database: ${e?.message || "Unknown error"}. Check Supabase connection.`);
+    }
   }
   return demo.update(table, id, patch) as T | undefined;
 }
