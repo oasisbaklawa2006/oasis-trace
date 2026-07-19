@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { insertRow } from "@/lib/data";
+import { audit } from "@/lib/audit";
 import { toast } from "sonner";
 import { AlertTriangle, ShieldCheck } from "lucide-react";
 import { useOlsSession } from "@/hooks/useOlsSession";
@@ -71,11 +72,15 @@ export function ReprintModal({ open, onOpenChange, refType, refId, refLabel, onC
       }
 
       // Case 2: instant approval or supervisor override → log + proceed.
+      // Deliberately NOT swallowed: `ols_reprint_requests` is the governance
+      // record of this reprint's authorization. If it fails to write, the
+      // whole reprint must be treated as failed (outer catch below) rather
+      // than silently continuing to print_logs/audit and reporting success.
       const reqRow = await insertRow<any>("ols_reprint_requests", {
         ref_type: refType, ref_id: refId,
         reason: packForRow(parsed, override && overrideAllowed),
         status: "approved",
-      }).catch((e: any) => { console.warn("reprint request insert skipped:", e?.message); return null; });
+      });
 
       await insertRow("ols_print_logs", {
         ref_type: refType, ref_id: refId,
@@ -83,13 +88,13 @@ export function ReprintModal({ open, onOpenChange, refType, refId, refLabel, onC
         reason: finalReason,
       });
 
-      try {
-        await insertRow("ols_audit_logs", {
-          action: override ? "reprint_override" : "reprint_immediate",
-          entity_type: refType, entity_id: refId,
-          details: { request_id: reqRow?.id, reason: finalReason, approver, override },
-        });
-      } catch { /* ignore */ }
+      // audit() never throws — a failed audit mirror queues for retry
+      // instead of silently vanishing or blocking an already-durable reprint.
+      await audit({
+        action: override ? "reprint_override" : "reprint_immediate",
+        entity_type: refType, entity_id: refId,
+        details: { request_id: reqRow.id, reason: finalReason, approver, override },
+      });
 
       toast.success(override ? "Supervisor override · reprint logged" : "Reprint logged", { description: refLabel });
       onConfirmed?.({ reason: finalReason, approver, watermark: DUPLICATE_WATERMARK });

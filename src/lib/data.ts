@@ -120,8 +120,12 @@ export async function insertRow<T = any>(table: string, row: Record<string, any>
         const err = new Error("Duplicate entry blocked"); (err as any).code = "23505";
         throw err;
       }
-      // Live mode is configured but write failed: hard error instead of silent fallback
-      setMode("demo", e?.message);
+      // Live mode is configured but the write failed: hard error instead of
+      // silent fallback. Deliberately do NOT call setMode("demo", ...) here —
+      // no data was written to (or served from) the local demo store, so
+      // flipping the app-wide badge to "Demo Fallback Mode" would misrepresent
+      // a blocked write as a silent fallback, which is exactly what this
+      // hard-fail path exists to prevent (see file header comment above).
       console.error(`[ols] insert ${table} failed in live mode:`, e?.message);
       throw new Error(`Cannot save to database: ${e?.message || "Unknown error"}. Check Supabase connection.`);
     }
@@ -140,8 +144,9 @@ export async function updateRow<T = any>(table: string, id: string, patch: Recor
       setMode("live");
       return data;
     } catch (e: any) {
-      // Live mode is configured but write failed: hard error instead of silent fallback
-      setMode("demo", e?.message);
+      // Live mode is configured but the write failed: hard error instead of
+      // silent fallback. Deliberately do NOT call setMode("demo", ...) here —
+      // see the matching comment in insertRow() above.
       console.error(`[ols] update ${table} failed in live mode:`, e?.message);
       throw new Error(`Cannot save to database: ${e?.message || "Unknown error"}. Check Supabase connection.`);
     }

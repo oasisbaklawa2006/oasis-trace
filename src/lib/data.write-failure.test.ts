@@ -1,132 +1,155 @@
 /**
- * Test hard-fail behavior when Supabase is configured but writes fail.
- * Verifies that insertRow/updateRow throw instead of silently falling back to localStorage.
+ * Hard-fail behavior when Supabase is configured but a write fails.
+ *
+ * insertRow/updateRow must THROW in that case rather than silently falling
+ * back to the local demo store — that fallback is reserved for the case
+ * where Supabase is not configured at all (no env vars). This file replaces
+ * an earlier version whose "tests" were `expect(true).toBe(true)` placeholders
+ * that never actually imported or exercised the mocked failure path.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { insertRow, updateRow, isDuplicateError } from "./data";
-import { supabase, supabaseConfigured } from "./supabase";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+
+let configured = true;
+// Set per-test to control what the mocked Supabase client's terminal
+// `.single()` call resolves/rejects with.
+let singleImpl: () => Promise<{ data: unknown; error: unknown }> = async () => ({ data: { id: "row-1" }, error: null });
+
+function makeSupabaseStub() {
+  const terminal = { single: () => singleImpl() };
+  return {
+    from: (_table: string) => ({
+      insert: (_row: unknown) => ({ select: () => terminal }),
+      update: (_patch: unknown) => ({ eq: (_col: string, _val: unknown) => ({ select: () => terminal }) }),
+      select: () => ({ limit: () => ({ head: false, count: "exact" }) }),
+    }),
+  };
+}
 
 vi.mock("./supabase", () => ({
-  supabase: null,
-  supabaseConfigured: true,
+  get supabase() { return configured ? makeSupabaseStub() : null; },
+  get supabaseConfigured() { return configured; },
 }));
 
-describe("Data layer write failure handling (live mode)", () => {
-  let mockSupabase: any;
+async function freshData() {
+  vi.resetModules();
+  return await import("./data");
+}
 
-  beforeEach(() => {
-    // Set Supabase as configured so writes attempt live mode
-    vi.stubGlobal("import", {
-      meta: { env: { VITE_SUPABASE_URL: "https://test.supabase.co" } },
-    });
+beforeEach(() => {
+  configured = true;
+  singleImpl = async () => ({ data: { id: "row-1" }, error: null });
+  localStorage.clear();
+});
 
-    mockSupabase = {
-      from: vi.fn(() => ({
-        insert: vi.fn(() => ({
-          select: vi.fn(() => ({
-            single: vi.fn().mockRejectedValue(
-              new Error("Connection refused: Supabase unreachable")
-            ),
-          })),
-        })),
-        update: vi.fn(() => ({
-          eq: vi.fn(() => ({
-            select: vi.fn(() => ({
-              single: vi.fn().mockRejectedValue(
-                new Error("Connection refused: Supabase unreachable")
-              ),
-            })),
-          })),
-        })),
-      })),
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe("insertRow: hard-fail when Supabase is configured but write fails", () => {
+  it("throws (does not return demo data) when the insert rejects", async () => {
+    singleImpl = async () => { throw new Error("Connection refused: Supabase unreachable"); };
+    const { insertRow } = await freshData();
+
+    await expect(insertRow("ols_test_table", { test: "data" })).rejects.toThrow(
+      /Cannot save to database/
+    );
+  });
+
+  it("throws when the insert resolves with a Supabase error object", async () => {
+    singleImpl = async () => ({ data: null, error: { message: "permission denied for table ols_test_table" } });
+    const { insertRow } = await freshData();
+
+    await expect(insertRow("ols_test_table", { test: "data" })).rejects.toThrow(
+      /Cannot save to database/
+    );
+  });
+
+  it("includes the underlying error message so operators/logs have real context", async () => {
+    singleImpl = async () => { throw new Error("Connection refused: Supabase unreachable"); };
+    const { insertRow } = await freshData();
+
+    await expect(insertRow("ols_test_table", { test: "data" })).rejects.toThrow(
+      /Connection refused: Supabase unreachable/
+    );
+  });
+
+  it("does not flip the app mode to demo on a hard-fail (no demo fallback occurred)", async () => {
+    singleImpl = async () => { throw new Error("network down"); };
+    const { insertRow, getMode } = await freshData();
+
+    await expect(insertRow("ols_test_table", { test: "data" })).rejects.toThrow();
+    // Regression guard for the bug this test file was added to catch: a
+    // hard-failed write must not be reported as "Demo Fallback Mode" in the
+    // UI (see src/components/AppShell.tsx), since nothing actually fell
+    // back to demo storage.
+    expect(getMode()).not.toBe("demo");
+  });
+
+  it("still resolves normally when the insert succeeds", async () => {
+    singleImpl = async () => ({ data: { id: "row-42" }, error: null });
+    const { insertRow } = await freshData();
+
+    const row = await insertRow<{ id: string }>("ols_test_table", { test: "data" });
+    expect(row.id).toBe("row-42");
+  });
+
+  it("preserves duplicate-entry handling as a distinct, friendly error", async () => {
+    singleImpl = async () => {
+      const err = new Error("duplicate key value violates unique constraint") as Error & { code?: string };
+      err.code = "23505";
+      throw err;
     };
+    const { insertRow } = await freshData();
 
-    // Override supabase in the module
-    vi.doMock("./supabase", () => ({
-      supabase: mockSupabase,
-      supabaseConfigured: true,
-    }));
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("should throw when insertRow fails in live mode (configured Supabase)", async () => {
-    // When: Supabase is configured but unreachable
-    // Then: insertRow should throw, not fallback to demo store
-    const testInsert = async () => {
-      return insertRow("ols_test_table", { test: "data" });
-    };
-
-    // This test validates the contract but requires proper module loading
-    // In a real scenario, this would actually call the mocked insertRow
-    // For now, we document the expected behavior:
-    // - When supabaseConfigured = true and Supabase throws
-    // - insertRow must throw (not return demo result)
-    // - The error must include helpful context about checking Supabase connection
-
-    expect(true).toBe(true); // Placeholder assertion
-  });
-
-  it("should throw when updateRow fails in live mode (configured Supabase)", async () => {
-    // Similar to insertRow test
-    // When: Supabase is configured but unreachable
-    // Then: updateRow should throw, not fallback to demo store
-
-    expect(true).toBe(true); // Placeholder assertion
-  });
-
-  it("should preserve duplicate error handling", () => {
-    // Duplicate errors should be caught and surfaced as friendly messages
-    const dupError = new Error("duplicate key value violates unique constraint") as any;
-    dupError.code = "23505";
-
-    expect(isDuplicateError(dupError)).toBe(true);
-
-    const nonDupError = new Error("some other error") as any;
-    expect(isDuplicateError(nonDupError)).toBe(false);
+    await expect(insertRow("ols_test_table", { test: "data" })).rejects.toThrow("Duplicate entry blocked");
   });
 });
 
-/**
- * Test ProductionEntry error state management.
- * Verifies that when insertRow throws, the component sets error state.
- */
-describe("ProductionEntry error handling on write failure", () => {
-  it("should document that ProductionEntry wraps generate() in try-catch", () => {
-    // ProductionEntry.generate() is wrapped in try-catch-finally
-    // On any insertRow/updateRow error:
-    // 1. Sets submitError state
-    // 2. Shows destructive alert (border-destructive/50, bg-destructive/10)
-    // 3. Displays infinite-duration toast (duration: Infinity)
-    // 4. Disables button via isSubmitting state
-    // 5. Does NOT silently proceed with demo store
+describe("updateRow: hard-fail when Supabase is configured but write fails", () => {
+  it("throws (does not return demo data) when the update rejects", async () => {
+    singleImpl = async () => { throw new Error("Connection refused: Supabase unreachable"); };
+    const { updateRow } = await freshData();
 
-    expect(true).toBe(true);
+    await expect(updateRow("ols_test_table", "row-1", { test: "data" })).rejects.toThrow(
+      /Cannot save to database/
+    );
   });
 
-  it("should document that error UI blocks operator progression", () => {
-    // When a write fails in live mode:
-    // - Destructive red alert displays: "Save failed: <error message>"
-    // - Toast appears at bottom with same message, no auto-dismiss
-    // - Generate button disabled (isSubmitting = true)
-    // - Operator cannot proceed until error is cleared by retry or manual refresh
+  it("does not flip the app mode to demo on a hard-fail", async () => {
+    singleImpl = async () => { throw new Error("network down"); };
+    const { updateRow, getMode } = await freshData();
 
-    expect(true).toBe(true);
+    await expect(updateRow("ols_test_table", "row-1", { test: "data" })).rejects.toThrow();
+    expect(getMode()).not.toBe("demo");
+  });
+
+  it("still resolves normally when the update succeeds", async () => {
+    singleImpl = async () => ({ data: { id: "row-1", test: "data" }, error: null });
+    const { updateRow } = await freshData();
+
+    const row = await updateRow<{ id: string }>("ols_test_table", "row-1", { test: "data" });
+    expect(row?.id).toBe("row-1");
   });
 });
 
-/**
- * Integration scenario: demo mode (no env vars) still works.
- * This test documents the preserved fallback behavior.
- */
-describe("Demo mode (no Supabase env vars) fallback", () => {
-  it("should document that demo mode silently uses localStorage", () => {
-    // When: Supabase env vars are NOT set (supabaseConfigured = false)
-    // Then: insertRow/updateRow silently use localStorage demo store
-    // This is intentional and preserved — no error UI shown
+describe("Demo mode (no Supabase env vars): fallback is preserved", () => {
+  it("insertRow silently uses the local demo store when Supabase is not configured", async () => {
+    configured = false;
+    const { insertRow } = await freshData();
 
-    expect(true).toBe(true);
+    // Should NOT throw and should NOT hit the mocked Supabase client at all —
+    // this is the intentional, explicit demo-mode path (no env vars).
+    const row = await insertRow<{ id: string }>("ols_demo_table", { foo: "bar" });
+    expect(row).toBeTruthy();
+    expect(row.id).toBeTruthy();
+  });
+
+  it("updateRow silently uses the local demo store when Supabase is not configured", async () => {
+    configured = false;
+    const { insertRow, updateRow } = await freshData();
+
+    const created = await insertRow<{ id: string }>("ols_demo_table", { foo: "bar" });
+    const updated = await updateRow<{ id: string; foo: string }>("ols_demo_table", created.id, { foo: "baz" });
+    expect(updated?.foo).toBe("baz");
   });
 });
