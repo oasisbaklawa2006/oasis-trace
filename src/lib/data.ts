@@ -1,8 +1,11 @@
 // Data layer for OASIS LABEL STUDIO.
-// Tries Supabase first against the live `ols_` tables. On any error (missing
-// table, RLS denial, network) it falls back to the local demo store so the UI
-// never breaks. Adds: timeout, retry-on-network, friendly duplicate handling,
-// online/offline detection.
+// Reads: tries Supabase first. On error (missing table, RLS denial, network),
+// falls back to local demo store so the UI never breaks.
+// Writes: when Supabase env vars are configured, hard-fails on write error
+// instead of silently falling back to localStorage. This prevents silent data
+// loss in production. Explicit demo mode (no env vars) continues using demo
+// store unchanged. Adds: timeout, retry-on-network, friendly duplicate
+// handling, online/offline detection.
 import { supabase, supabaseConfigured } from "./supabase";
 import { demo } from "./demoStore";
 
@@ -117,8 +120,14 @@ export async function insertRow<T = any>(table: string, row: Record<string, any>
         const err = new Error("Duplicate entry blocked"); (err as any).code = "23505";
         throw err;
       }
-      setMode("demo", e?.message);
-      console.warn(`[ols] insert ${table} fell back to demo:`, e?.message);
+      // Live mode is configured but the write failed: hard error instead of
+      // silent fallback. Deliberately do NOT call setMode("demo", ...) here —
+      // no data was written to (or served from) the local demo store, so
+      // flipping the app-wide badge to "Demo Fallback Mode" would misrepresent
+      // a blocked write as a silent fallback, which is exactly what this
+      // hard-fail path exists to prevent (see file header comment above).
+      console.error(`[ols] insert ${table} failed in live mode:`, e?.message);
+      throw new Error(`Cannot save to database: ${e?.message || "Unknown error"}. Check Supabase connection.`);
     }
   }
   return demo.insert(table, row) as T;
@@ -134,7 +143,13 @@ export async function updateRow<T = any>(table: string, id: string, patch: Recor
       });
       setMode("live");
       return data;
-    } catch (e: any) { setMode("demo", e?.message); console.warn(`[ols] update ${table} fell back to demo:`, e?.message); }
+    } catch (e: any) {
+      // Live mode is configured but the write failed: hard error instead of
+      // silent fallback. Deliberately do NOT call setMode("demo", ...) here —
+      // see the matching comment in insertRow() above.
+      console.error(`[ols] update ${table} failed in live mode:`, e?.message);
+      throw new Error(`Cannot save to database: ${e?.message || "Unknown error"}. Check Supabase connection.`);
+    }
   }
   return demo.update(table, id, patch) as T | undefined;
 }

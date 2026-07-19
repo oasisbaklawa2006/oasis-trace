@@ -19,6 +19,8 @@ export default function FinancePI() {
   const [scan, setScan] = useState("");
   const [active, setActive] = useState<any | null>(null);
   const [invoiceRef, setInvoiceRef] = useState("");
+  const [piError, setPiError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => { reload(); }, []);
   async function reload() {
@@ -30,63 +32,76 @@ export default function FinancePI() {
   }
 
   async function scanCarton() {
-    const code = scan.trim();
-    if (!code) return;
-    const c = cartons.find(x => x.carton_no === code);
-    if (!c) { toast.error("Carton not found"); return; }
-    let pi = active;
-    if (!pi) {
-      pi = await insertRow<any>("ols_finance_pi", {
-        pi_no: num.pi(),
-        order_ref: c.order_ref,
-        customer_name: c.customer_name,
-        status: "pending",
-      });
-      setActive(pi);
-      // ensure recent PIs list shows it immediately
-      setPis(prev => [pi, ...prev]);
+    try {
+      setPiError(null);
+      const code = scan.trim();
+      if (!code) return;
+      const c = cartons.find(x => x.carton_no === code);
+      if (!c) { toast.error("Carton not found"); return; }
+      let pi = active;
+      if (!pi) {
+        pi = await insertRow<any>("ols_finance_pi", {
+          pi_no: num.pi(),
+          order_ref: c.order_ref,
+          customer_name: c.customer_name,
+          status: "pending",
+        });
+        setActive(pi);
+        setPis(prev => [pi, ...prev]);
+      }
+      const dup = piCartons.find(p => p.pi_id === pi.id && p.carton_id === c.id);
+      if (dup) { toast.error("Carton already on this PI"); setScan(""); return; }
+      const link = await insertRow<any>("ols_finance_pi_cartons", { pi_id: pi.id, carton_id: c.id });
+      await updateRow("ols_cartons", c.id, { status: "finance_received" });
+      setPiCartons(prev => [...prev, link]);
+      setCartons(prev => prev.map(x => x.id === c.id ? { ...x, status: "finance_received" } : x));
+      setScan("");
+      toast.success(`Carton ${c.carton_no} added to PI ${pi.pi_no}`);
+      await reload();
+    } catch (err: any) {
+      const msg = err?.message || "Failed to add carton to PI";
+      setPiError(msg);
+      toast.error(msg, { duration: Infinity });
     }
-    const dup = piCartons.find(p => p.pi_id === pi.id && p.carton_id === c.id);
-    if (dup) { toast.error("Carton already on this PI"); setScan(""); return; }
-    const link = await insertRow<any>("ols_finance_pi_cartons", { pi_id: pi.id, carton_id: c.id });
-    await updateRow("ols_cartons", c.id, { status: "finance_received" });
-    // Optimistic local updates so the counter reflects reality immediately,
-    // even before the next reload completes.
-    setPiCartons(prev => [...prev, link]);
-    setCartons(prev => prev.map(x => x.id === c.id ? { ...x, status: "finance_received" } : x));
-    setScan("");
-    toast.success(`Carton ${c.carton_no} added to PI ${pi.pi_no}`);
-    await reload();
   }
 
   async function clearPI() {
-    if (!active) return;
-    if (!invoiceRef) { toast.error("Enter invoice reference"); return; }
-    await updateRow("ols_finance_pi", active.id, { status: "cleared", cleared_at: new Date().toISOString(), invoice_ref: invoiceRef });
-    const linked = piCartons.filter(p => p.pi_id === active.id).map(p => p.carton_id);
-    for (const cid of linked) await updateRow("ols_cartons", cid, { status: "invoiced" });
+    try {
+      setPiError(null);
+      if (!active) return;
+      if (!invoiceRef) { toast.error("Enter invoice reference"); return; }
+      setIsSubmitting(true);
+      await updateRow("ols_finance_pi", active.id, { status: "cleared", cleared_at: new Date().toISOString(), invoice_ref: invoiceRef });
+      const linked = piCartons.filter(p => p.pi_id === active.id).map(p => p.carton_id);
+      for (const cid of linked) await updateRow("ols_cartons", cid, { status: "invoiced" });
 
-    // Build SKU-wise simplified lines for customer view and persist them.
-    const linkedCtns = cartons.filter(c => linked.includes(c.id));
-    const bySku: Record<string, { name: string; qty: number; net: number; gross: number }> = {};
-    for (const c of linkedCtns) {
-      const items = contents.filter(x => x.carton_id === c.id);
-      for (const it of items) {
-        const lbl = labels.find(l => l.id === it.production_label_id);
-        const sku = lbl?.metadata?.sku || it.manual_sku || "—";
-        const name = lbl?.metadata?.product_name || "—";
-        bySku[sku] ||= { name, qty: 0, net: 0, gross: 0 };
-        bySku[sku].qty += 1;
-        bySku[sku].net += lbl?.net_weight || 0;
-        bySku[sku].gross += lbl?.gross_weight || 0;
+      const linkedCtns = cartons.filter(c => linked.includes(c.id));
+      const bySku: Record<string, { name: string; qty: number; net: number; gross: number }> = {};
+      for (const c of linkedCtns) {
+        const items = contents.filter(x => x.carton_id === c.id);
+        for (const it of items) {
+          const lbl = labels.find(l => l.id === it.production_label_id);
+          const sku = lbl?.metadata?.sku || it.manual_sku || "—";
+          const name = lbl?.metadata?.product_name || "—";
+          bySku[sku] ||= { name, qty: 0, net: 0, gross: 0 };
+          bySku[sku].qty += 1;
+          bySku[sku].net += lbl?.net_weight || 0;
+          bySku[sku].gross += lbl?.gross_weight || 0;
+        }
       }
+      for (const [sku, v] of Object.entries(bySku)) {
+        await insertRow("ols_finance_pi_lines", { pi_id: active.id, sku, product_name: v.name, quantity: v.qty, net_weight: v.net, gross_weight: v.gross });
+      }
+      toast.success("PI cleared — shipping labels can now be generated");
+      setActive(null); setInvoiceRef("");
+      await reload();
+    } catch (err: any) {
+      const msg = err?.message || "Failed to clear PI";
+      setPiError(msg);
+      toast.error(msg, { duration: Infinity });
+    } finally {
+      setIsSubmitting(false);
     }
-    for (const [sku, v] of Object.entries(bySku)) {
-      await insertRow("ols_finance_pi_lines", { pi_id: active.id, sku, product_name: v.name, quantity: v.qty, net_weight: v.net, gross_weight: v.gross });
-    }
-    toast.success("PI cleared — shipping labels can now be generated");
-    setActive(null); setInvoiceRef("");
-    await reload();
   }
 
   const linkedCartons = active ? cartons.filter(c => piCartons.some(pc => pc.pi_id === active.id && pc.carton_id === c.id)) : [];
@@ -122,8 +137,13 @@ export default function FinancePI() {
               onKeyDown={e => e.key === "Enter" && scanCarton()}
               placeholder="Scan carton barcode…" className="font-mono" autoFocus
             />
-            <Button onClick={scanCarton}><ScanBarcode size={16} /></Button>
+            <Button onClick={scanCarton} disabled={isSubmitting}><ScanBarcode size={16} /></Button>
           </div>
+          {piError && (
+            <div className="mt-3 rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+              <strong>PI error:</strong> {piError}
+            </div>
+          )}
           {active && (
             <div className="mt-4 rounded-xl border bg-surface p-3">
               <p className="ols-section-title">Active PI</p>
@@ -133,7 +153,7 @@ export default function FinancePI() {
               <div className="mt-3 space-y-2">
                 <Label className="text-xs">Invoice reference</Label>
                 <Input value={invoiceRef} onChange={e => setInvoiceRef(e.target.value)} placeholder="INV-2026-…" />
-                <Button onClick={clearPI} className="w-full bg-gradient-gold text-accent-foreground shadow-gold">
+                <Button onClick={clearPI} disabled={isSubmitting} className="w-full bg-gradient-gold text-accent-foreground shadow-gold">
                   <BadgeCheck size={16} className="mr-1.5" /> Mark Cleared
                 </Button>
               </div>

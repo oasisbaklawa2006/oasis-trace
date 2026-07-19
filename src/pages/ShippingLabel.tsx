@@ -14,6 +14,8 @@ export default function ShippingLabel() {
   const [pis, setPis] = useState<any[]>([]);
   const [labels, setLabels] = useState<any[]>([]);
   const [reprint, setReprint] = useState<any | null>(null);
+  const [labelError, setLabelError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => { reload(); }, []);
   async function reload() {
@@ -25,22 +27,32 @@ export default function ShippingLabel() {
   const eligible = cartons.filter(c => c.status === "invoiced");
 
   async function generate(carton: any) {
-    const pi = pis.find(p => p.order_ref === carton.order_ref && p.status === "cleared");
-    const lbl = await insertRow<any>("ols_shipping_labels", {
-      shipping_no: num.shipping(),
-      carton_id: carton.id,
-      pi_id: pi?.id,
-      consignor: "Oasis Baklawa LLC",
-      consignee: carton.customer_name,
-      address: "—",
-      invoice_ref: pi?.invoice_ref,
-      qr_ref: num.qrRef(),
-      status: "printed",
-    });
-    await updateRow("ols_cartons", carton.id, { status: "shipping_labelled" });
-    await insertRow("ols_print_logs", { ref_type: "shipping", ref_id: lbl.id, success: true });
-    toast.success(`Shipping label ${lbl.shipping_no} generated`);
-    reload();
+    try {
+      setLabelError(null);
+      setIsSubmitting(true);
+      const pi = pis.find(p => p.order_ref === carton.order_ref && p.status === "cleared");
+      const lbl = await insertRow<any>("ols_shipping_labels", {
+        shipping_no: num.shipping(),
+        carton_id: carton.id,
+        pi_id: pi?.id,
+        consignor: "Oasis Baklawa LLC",
+        consignee: carton.customer_name,
+        address: "—",
+        invoice_ref: pi?.invoice_ref,
+        qr_ref: num.qrRef(),
+        status: "printed",
+      });
+      await updateRow("ols_cartons", carton.id, { status: "shipping_labelled" });
+      await insertRow("ols_print_logs", { ref_type: "shipping", ref_id: lbl.id, success: true });
+      toast.success(`Shipping label ${lbl.shipping_no} generated`);
+      reload();
+    } catch (err: any) {
+      const msg = err?.message || "Failed to generate shipping label";
+      setLabelError(msg);
+      toast.error(msg, { duration: Infinity });
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -50,6 +62,11 @@ export default function ShippingLabel() {
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="ols-card p-5">
           <h3 className="mb-3 text-sm font-semibold">Cartons awaiting shipping label</h3>
+          {labelError && (
+            <div className="mb-3 rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+              <strong>Label error:</strong> {labelError}
+            </div>
+          )}
           {eligible.length === 0 ? (
             <p className="py-6 text-center text-sm text-muted-foreground">All invoiced cartons have shipping labels.</p>
           ) : (
@@ -60,7 +77,7 @@ export default function ShippingLabel() {
                     <p className="font-mono text-xs">{c.carton_no}</p>
                     <p className="text-xs text-muted-foreground">{c.order_ref} · {c.customer_name}</p>
                   </div>
-                  <Button size="sm" onClick={() => generate(c)} className="bg-gradient-primary text-primary-foreground"><Tag size={14} className="mr-1" /> Generate</Button>
+                  <Button size="sm" onClick={() => generate(c)} disabled={isSubmitting} className="bg-gradient-primary text-primary-foreground"><Tag size={14} className="mr-1" /> Generate</Button>
                 </li>
               ))}
             </ul>

@@ -35,6 +35,7 @@ export default function Cartonization() {
   const [identityResult, setIdentityResult] = useState<ScanFlowResult | null>(null);
   const [submitResult, setSubmitResult] = useState<CentralSubmitResult | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [cartonError, setCartonError] = useState<string | null>(null);
   const { session, canSubmitCentral } = useOlsSession();
   const [recentCartons, setRecentCartons] = useState<any[]>([]);
 
@@ -54,85 +55,113 @@ export default function Cartonization() {
   })(); }, []);
 
   async function startCarton() {
-    if (!orderRef) { toast.error("Pick an order first"); return; }
-    const order = orders.find(o => o.order_number === orderRef);
-    const legacyNo = num.carton();
-    const metadata = buildCartonMetadata(orderRef, legacyNo);
-    const c = await insertRow<any>("ols_cartons", {
-      carton_no: legacyNo,
-      order_ref: orderRef,
-      customer_code: order?.customer_code,
-      customer_name: order?.customer_name,
-      status: "draft",
-      carton_index: (recentCartons.filter(r => r.order_ref === orderRef).length) + 1,
-      metadata,
-    });
-    setCarton(c);
-    setContents([]);
-    setIdentityResult(null);
-    setSubmitResult(null);
-    const display = resolveCartonBarcodeDisplay(orderRef, legacyNo, metadata);
-    if (display.centralBarcode) {
-      toast.success(`Carton started · Central barcode ${display.centralBarcode}`);
-    } else {
-      toast.success(`Carton ${legacyNo} created (legacy/local barcode)`);
+    try {
+      setCartonError(null);
+      if (!orderRef) { toast.error("Pick an order first"); return; }
+      const order = orders.find(o => o.order_number === orderRef);
+      const legacyNo = num.carton();
+      const metadata = buildCartonMetadata(orderRef, legacyNo);
+      const c = await insertRow<any>("ols_cartons", {
+        carton_no: legacyNo,
+        order_ref: orderRef,
+        customer_code: order?.customer_code,
+        customer_name: order?.customer_name,
+        status: "draft",
+        carton_index: (recentCartons.filter(r => r.order_ref === orderRef).length) + 1,
+        metadata,
+      });
+      setCarton(c);
+      setContents([]);
+      setIdentityResult(null);
+      setSubmitResult(null);
+      const display = resolveCartonBarcodeDisplay(orderRef, legacyNo, metadata);
+      if (display.centralBarcode) {
+        toast.success(`Carton started · Central barcode ${display.centralBarcode}`);
+      } else {
+        toast.success(`Carton ${legacyNo} created (legacy/local barcode)`);
+      }
+    } catch (err: any) {
+      const msg = err?.message || "Failed to create carton";
+      setCartonError(msg);
+      toast.error(msg, { duration: Infinity });
     }
   }
 
   async function verifyCartonIdentity() {
-    const code = identityScan.trim();
-    if (!code || !carton) return;
-    const flow = await processCartonIdentityScan(code, carton.order_ref, orders);
-    setIdentityResult(flow);
-    setSubmitResult(null);
-    if (flow.duplicate) {
-      feedback("dup");
-      toast.warning(flow.userMessage);
-    } else if (flow.ok) {
-      feedback("ok");
-      toast.success(flow.userMessage);
-    } else {
-      feedback("error");
-      toast.error(flow.userMessage);
+    try {
+      setCartonError(null);
+      const code = identityScan.trim();
+      if (!code || !carton) return;
+      const flow = await processCartonIdentityScan(code, carton.order_ref, orders);
+      setIdentityResult(flow);
+      setSubmitResult(null);
+      if (flow.duplicate) {
+        feedback("dup");
+        toast.warning(flow.userMessage);
+      } else if (flow.ok) {
+        feedback("ok");
+        toast.success(flow.userMessage);
+      } else {
+        feedback("error");
+        toast.error(flow.userMessage);
+      }
+      setIdentityScan("");
+    } catch (err: any) {
+      const msg = err?.message || "Failed to verify carton identity";
+      setCartonError(msg);
+      toast.error(msg, { duration: Infinity });
     }
-    setIdentityScan("");
   }
 
   async function scanLabel() {
-    const code = scanInput.trim();
-    if (!code || !carton) return;
-    const lbl = labels.find(l => l.label_no === code);
-    if (!lbl) { feedback("error"); toast.error("Label not found", { description: "Use manual add if needed." }); return; }
-    if (packed.has(lbl.id)) { feedback("dup"); toast.error("Duplicate scan blocked", { description: "Label already in another active carton." }); return; }
-    const row = await insertRow<any>("ols_carton_contents", { carton_id: carton.id, production_label_id: lbl.id });
-    await insertRow("ols_inventory_movements", {
-      production_label_id: lbl.id, from_location: "store", to_location: "packing",
-      movement_type: "carton_pack", reference_no: carton.carton_no,
-    });
-    setContents(c => [...c, { ...row, label: lbl }]);
-    setPacked(p => new Set(p).add(lbl.id));
-    setScanInput("");
-    feedback("ok");
+    try {
+      setCartonError(null);
+      const code = scanInput.trim();
+      if (!code || !carton) return;
+      const lbl = labels.find(l => l.label_no === code);
+      if (!lbl) { feedback("error"); toast.error("Label not found", { description: "Use manual add if needed." }); return; }
+      if (packed.has(lbl.id)) { feedback("dup"); toast.error("Duplicate scan blocked", { description: "Label already in another active carton." }); return; }
+      const row = await insertRow<any>("ols_carton_contents", { carton_id: carton.id, production_label_id: lbl.id });
+      await insertRow("ols_inventory_movements", {
+        production_label_id: lbl.id, from_location: "store", to_location: "packing",
+        movement_type: "carton_pack", reference_no: carton.carton_no,
+      });
+      setContents(c => [...c, { ...row, label: lbl }]);
+      setPacked(p => new Set(p).add(lbl.id));
+      setScanInput("");
+      feedback("ok");
+    } catch (err: any) {
+      const msg = err?.message || "Failed to add label to carton";
+      setCartonError(msg);
+      toast.error(msg, { duration: Infinity });
+    }
   }
 
   async function finalizeCarton() {
-    if (!carton || contents.length === 0) { toast.error("Add at least one label"); return; }
-    if (supportsCentralBarcode(carton.order_ref) && !identityResult?.ok) {
-      toast.error("Verify Central carton identity first", {
-        description: "Scan the CTN-SO barcode before packing.",
+    try {
+      setCartonError(null);
+      if (!carton || contents.length === 0) { toast.error("Add at least one label"); return; }
+      if (supportsCentralBarcode(carton.order_ref) && !identityResult?.ok) {
+        toast.error("Verify Central carton identity first", {
+          description: "Scan the CTN-SO barcode before packing.",
+        });
+        return;
+      }
+      const net = contents.reduce((s, c) => s + (c.label?.net_weight || 0), 0);
+      const gross = contents.reduce((s, c) => s + (c.label?.gross_weight || 0), 0);
+      await updateRow("ols_cartons", carton.id, {
+        status: "packed", packed_at: new Date().toISOString(),
+        net_weight: net, gross_weight: gross,
       });
-      return;
+      await insertRow("ols_print_logs", { ref_type: "carton", ref_id: carton.id, success: true });
+      toast.success("Carton packed & label printed");
+      setCarton(null); setContents([]); setIdentityResult(null);
+      setRecentCartons(await listTable("ols_cartons", { order: "created_at", limit: 6 }));
+    } catch (err: any) {
+      const msg = err?.message || "Failed to finalize carton";
+      setCartonError(msg);
+      toast.error(msg, { duration: Infinity });
     }
-    const net = contents.reduce((s, c) => s + (c.label?.net_weight || 0), 0);
-    const gross = contents.reduce((s, c) => s + (c.label?.gross_weight || 0), 0);
-    await updateRow("ols_cartons", carton.id, {
-      status: "packed", packed_at: new Date().toISOString(),
-      net_weight: net, gross_weight: gross,
-    });
-    await insertRow("ols_print_logs", { ref_type: "carton", ref_id: carton.id, success: true });
-    toast.success("Carton packed & label printed");
-    setCarton(null); setContents([]); setIdentityResult(null);
-    setRecentCartons(await listTable("ols_cartons", { order: "created_at", limit: 6 }));
   }
 
 
@@ -141,33 +170,49 @@ export default function Cartonization() {
 
   async function handleSubmitCentral() {
     if (!identityResult?.payload || !identityResult.idempotencyKey) return;
-    setSubmitting(true);
-    const r = await submitCentralScan({
-      idempotencyKey: identityResult.idempotencyKey,
-      payload: identityResult.payload as unknown as Record<string, unknown>,
-      scanHistoryId: identityResult.scanHistoryId,
-      session,
-    });
-    setSubmitResult(r);
-    setSubmitting(false);
-    if (r.ok) toast.success(r.message);
-    else if (r.duplicate) toast.warning(r.message);
-    else toast.error(r.message);
+    try {
+      setCartonError(null);
+      setSubmitting(true);
+      const r = await submitCentralScan({
+        idempotencyKey: identityResult.idempotencyKey,
+        payload: identityResult.payload as unknown as Record<string, unknown>,
+        scanHistoryId: identityResult.scanHistoryId,
+        session,
+      });
+      setSubmitResult(r);
+      if (r.ok) toast.success(r.message);
+      else if (r.duplicate) toast.warning(r.message);
+      else toast.error(r.message);
+    } catch (err: any) {
+      const msg = err?.message || "Failed to submit carton identity to Central";
+      setCartonError(msg);
+      toast.error(msg, { duration: Infinity });
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   async function handleRetryCentral() {
     if (!identityResult?.payload || !identityResult.idempotencyKey) return;
-    setSubmitting(true);
-    const r = await retryCentralScan({
-      idempotencyKey: identityResult.idempotencyKey,
-      payload: identityResult.payload as unknown as Record<string, unknown>,
-      scanHistoryId: identityResult.scanHistoryId,
-      session,
-    });
-    setSubmitResult(r);
-    setSubmitting(false);
-    if (r.ok) toast.success(r.message);
-    else toast.error(r.message);
+    try {
+      setCartonError(null);
+      setSubmitting(true);
+      const r = await retryCentralScan({
+        idempotencyKey: identityResult.idempotencyKey,
+        payload: identityResult.payload as unknown as Record<string, unknown>,
+        scanHistoryId: identityResult.scanHistoryId,
+        session,
+      });
+      setSubmitResult(r);
+      if (r.ok) toast.success(r.message);
+      else toast.error(r.message);
+    } catch (err: any) {
+      const msg = err?.message || "Failed to retry carton identity submission";
+      setCartonError(msg);
+      toast.error(msg, { duration: Infinity });
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   const fastScan = typeof window !== "undefined" && window.matchMedia("(max-width: 640px)").matches;
@@ -195,6 +240,12 @@ export default function Cartonization() {
               <Button variant="outline" onClick={finalizeCarton}><Printer size={16} className="mr-1.5" /> Pack & Print Carton Label</Button>
             )}
           </div>
+
+          {cartonError && (
+            <div className="mt-3 rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+              <strong>Carton error:</strong> {cartonError}
+            </div>
+          )}
 
           {carton && (
             <div className="mt-5 rounded-2xl border bg-gradient-surface p-4">

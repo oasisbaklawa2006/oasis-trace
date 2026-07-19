@@ -3,6 +3,7 @@
 // every state change to `ols_audit_logs.details` so we have a tamper-evident
 // trail without a destructive migration.
 import { listTable, insertRow, updateRow } from "@/lib/data";
+import { audit } from "@/lib/audit";
 
 export const REASON_DELIM = " ‖ ";
 
@@ -106,18 +107,23 @@ export function canApprove(): boolean { return canOverride(); }
 export async function createPendingRequest(opts: {
   refType: ReprintRefType; refId: string; refLabel: string;
   parsed: ParsedReason;
-}): Promise<ReprintRow | null> {
-  try {
-    const row = await insertRow<ReprintRow>("ols_reprint_requests", {
-      ref_type: opts.refType, ref_id: opts.refId,
-      reason: packReason(opts.parsed), status: "pending",
-    });
-    await safeAudit("reprint_requested", opts.refType, opts.refId, { ref: opts.refLabel, ...opts.parsed });
-    return row;
-  } catch (e: any) {
-    console.warn("createPendingRequest failed:", e?.message);
-    return null;
-  }
+}): Promise<ReprintRow> {
+  // Deliberately does NOT catch-and-return-null here: `ols_reprint_requests`
+  // is the governance record of *why* a queued reprint was authorized. If
+  // this write fails, the caller must find out (and show the operator a real
+  // failure) rather than being told "queued for approval" while nothing was
+  // actually persisted. See ReprintModal.tsx's confirm() for the surfacing.
+  const row = await insertRow<ReprintRow>("ols_reprint_requests", {
+    ref_type: opts.refType, ref_id: opts.refId,
+    reason: packReason(opts.parsed), status: "pending",
+  });
+  // audit() never throws (it queues offline on failure) — a failed audit
+  // mirror must not undo an already-durable pending request.
+  await audit({
+    action: "reprint_requested", entity_type: opts.refType, entity_id: opts.refId,
+    details: { ref: opts.refLabel, ...opts.parsed },
+  });
+  return row;
 }
 
 export async function approveRequest(row: ReprintRow, approver: string, remarks?: string) {
@@ -128,7 +134,10 @@ export async function approveRequest(row: ReprintRow, approver: string, remarks?
     status: "approved",
     reason: packReason(parsed),
   });
-  await safeAudit("reprint_approved", row.ref_type, row.ref_id, { approver, remarks });
+  await audit({
+    action: "reprint_approved", entity_type: row.ref_type, entity_id: row.ref_id,
+    details: { approver, remarks },
+  });
   return parsed;
 }
 
@@ -140,11 +149,8 @@ export async function rejectRequest(row: ReprintRow, approver: string, remarks?:
     status: "rejected",
     reason: packReason(parsed),
   });
-  await safeAudit("reprint_rejected", row.ref_type, row.ref_id, { approver, remarks });
-}
-
-async function safeAudit(action: string, refType: string, refId: string, details: any) {
-  try {
-    await insertRow("ols_audit_logs", { action, entity_type: refType, entity_id: refId, details });
-  } catch (e: any) { console.warn("audit log skipped:", e?.message); }
+  await audit({
+    action: "reprint_rejected", entity_type: row.ref_type, entity_id: row.ref_id,
+    details: { approver, remarks },
+  });
 }

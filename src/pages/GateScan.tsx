@@ -30,6 +30,7 @@ export default function GateScan() {
   const [ctnResult, setCtnResult] = useState<ScanFlowResult | null>(null);
   const [submitResult, setSubmitResult] = useState<CentralSubmitResult | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
   const { session, canSubmitCentral } = useOlsSession();
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -43,92 +44,108 @@ export default function GateScan() {
   }
 
   async function checkLegacyShipping(ref: string) {
-    const lbl = labels.find(l => l.qr_ref === ref || l.shipping_no === ref);
-    let res: LegacyResult;
-    if (!lbl) res = { kind: "red", title: "REJECTED", reason: "Invalid reference / shipping label not found", ref };
-    else {
-      const ctn = cartons.find(c => c.id === lbl.carton_id);
-      const pi = pis.find(p => p.id === lbl.pi_id);
-      if (!ctn) res = { kind: "red", title: "REJECTED", reason: "Carton missing" };
-      else if (ctn.status === "cancelled" || ctn.status === "held") res = { kind: "red", title: "HOLD", reason: `Carton status is ${ctn.status}` };
-      else if (ctn.status === "dispatched") res = { kind: "red", title: "DUPLICATE", reason: "Carton already dispatched" };
-      else if (!pi || pi.status !== "cleared") res = { kind: "red", title: "HOLD", reason: "PI not cleared" };
-      else if (!pi.invoice_ref) res = { kind: "red", title: "HOLD", reason: "Invoice missing" };
-      else if (lbl.status === "dispatched") res = { kind: "red", title: "DUPLICATE", reason: "Shipping label already dispatched" };
+    try {
+      setScanError(null);
+      const lbl = labels.find(l => l.qr_ref === ref || l.shipping_no === ref);
+      let res: LegacyResult;
+      if (!lbl) res = { kind: "red", title: "REJECTED", reason: "Invalid reference / shipping label not found", ref };
       else {
-        res = { kind: "green", title: "ALLOWED", ref: ctn.carton_no };
-        await updateRow("ols_cartons", ctn.id, { status: "dispatched" });
-        await updateRow("ols_shipping_labels", lbl.id, { status: "dispatched" });
-        await insertRow("ols_inventory_movements", {
-          production_label_id: null, from_location: "shipping", to_location: "dispatched",
-          movement_type: "gate_clear", reference_no: ctn.carton_no,
-        });
+        const ctn = cartons.find(c => c.id === lbl.carton_id);
+        const pi = pis.find(p => p.id === lbl.pi_id);
+        if (!ctn) res = { kind: "red", title: "REJECTED", reason: "Carton missing" };
+        else if (ctn.status === "cancelled" || ctn.status === "held") res = { kind: "red", title: "HOLD", reason: `Carton status is ${ctn.status}` };
+        else if (ctn.status === "dispatched") res = { kind: "red", title: "DUPLICATE", reason: "Carton already dispatched" };
+        else if (!pi || pi.status !== "cleared") res = { kind: "red", title: "HOLD", reason: "PI not cleared" };
+        else if (!pi.invoice_ref) res = { kind: "red", title: "HOLD", reason: "Invoice missing" };
+        else if (lbl.status === "dispatched") res = { kind: "red", title: "DUPLICATE", reason: "Shipping label already dispatched" };
+        else {
+          res = { kind: "green", title: "ALLOWED", ref: ctn.carton_no };
+          await updateRow("ols_cartons", ctn.id, { status: "dispatched" });
+          await updateRow("ols_shipping_labels", lbl.id, { status: "dispatched" });
+          await insertRow("ols_inventory_movements", {
+            production_label_id: null, from_location: "shipping", to_location: "dispatched",
+            movement_type: "gate_clear", reference_no: ctn.carton_no,
+          });
+          await insertRow("ols_audit_logs", {
+            action: "gate_dispatched", entity_type: "shipping_label", entity_id: lbl.id,
+            details: { carton_no: ctn.carton_no, shipping_no: lbl.shipping_no, qr_ref: ref },
+          });
+        }
+      }
+      await insertRow("ols_gate_scans", { qr_ref: ref, shipping_label_id: lbl?.id, result: res.kind, reason: res.reason });
+      await insertRow("ols_scan_history", {
+        scan_value: ref, scan_context: "gate_shipping_qr", result: res.kind,
+        metadata: { reason: res.reason || null, legacy_flow: true },
+      });
+      if (res.kind === "red") {
         await insertRow("ols_audit_logs", {
-          action: "gate_dispatched", entity_type: "shipping_label", entity_id: lbl.id,
-          details: { carton_no: ctn.carton_no, shipping_no: lbl.shipping_no, qr_ref: ref },
+          action: "gate_hold", entity_type: "shipping_label", entity_id: lbl?.id,
+          details: { qr_ref: ref, reason: res.reason },
         });
       }
+      feedback(res.kind === "green" ? "ok" : (res.title === "DUPLICATE" ? "dup" : "error"));
+      setLegacyResult(res);
+      setCtnResult(null);
+    } catch (err: any) {
+      const msg = err?.message || "Failed to record scan";
+      setScanError(msg);
+      toast.error(msg, { duration: Infinity });
+      feedback("error");
+      throw err;
     }
-    await insertRow("ols_gate_scans", { qr_ref: ref, shipping_label_id: lbl?.id, result: res.kind, reason: res.reason });
-    await insertRow("ols_scan_history", {
-      scan_value: ref, scan_context: "gate_shipping_qr", result: res.kind,
-      metadata: { reason: res.reason || null, legacy_flow: true },
-    });
-    if (res.kind === "red") {
-      await insertRow("ols_audit_logs", {
-        action: "gate_hold", entity_type: "shipping_label", entity_id: lbl?.id,
-        details: { qr_ref: ref, reason: res.reason },
-      });
-    }
-    feedback(res.kind === "green" ? "ok" : (res.title === "DUPLICATE" ? "dup" : "error"));
-    setLegacyResult(res);
-    setCtnResult(null);
   }
 
   async function check() {
-    const ref = scan.trim();
-    if (!ref) return;
+    try {
+      setScanError(null);
+      const ref = scan.trim();
+      if (!ref) return;
 
-    const kind = classifyCartonBarcode(ref);
-    setLegacyResult(null);
-    setCtnResult(null);
-    setSubmitResult(null);
-
-    if (kind === "central") {
-      const flow = await processDispatchGateCtnSoScan(ref, orders);
-      setCtnResult(flow);
+      const kind = classifyCartonBarcode(ref);
+      setLegacyResult(null);
+      setCtnResult(null);
       setSubmitResult(null);
-      if (flow.duplicate) {
-        feedback("dup");
-        toast.warning(flow.userMessage);
-      } else if (flow.ok) {
-        feedback("ok");
-        toast.success(flow.userMessage);
-      } else {
-        feedback("error");
-        toast.error(flow.userMessage);
+
+      if (kind === "central") {
+        const flow = await processDispatchGateCtnSoScan(ref, orders);
+        setCtnResult(flow);
+        setSubmitResult(null);
+        if (flow.duplicate) {
+          feedback("dup");
+          toast.warning(flow.userMessage);
+        } else if (flow.ok) {
+          feedback("ok");
+          toast.success(flow.userMessage);
+        } else {
+          feedback("error");
+          toast.error(flow.userMessage);
+        }
+        setScan("");
+        reload();
+        inputRef.current?.focus();
+        return;
       }
+
+      if (kind === "legacy") {
+        feedback("error");
+        toast.error("Barcode format invalid", {
+          description: "Legacy CTN-YYYYMMDD barcodes use shipping QR at gate. Scan CTN-SO-* for Central gate check.",
+        });
+        setScan("");
+        inputRef.current?.focus();
+        return;
+      }
+
+      // Shipping QR / other refs — legacy gate flow
+      await checkLegacyShipping(ref);
       setScan("");
       reload();
       inputRef.current?.focus();
-      return;
+    } catch (err: any) {
+      const msg = err?.message || "Scan failed";
+      setScanError(msg);
+      toast.error(msg, { duration: Infinity });
     }
-
-    if (kind === "legacy") {
-      feedback("error");
-      toast.error("Barcode format invalid", {
-        description: "Legacy CTN-YYYYMMDD barcodes use shipping QR at gate. Scan CTN-SO-* for Central gate check.",
-      });
-      setScan("");
-      inputRef.current?.focus();
-      return;
-    }
-
-    // Shipping QR / other refs — legacy gate flow
-    await checkLegacyShipping(ref);
-    setScan("");
-    reload();
-    inputRef.current?.focus();
   }
 
 
@@ -196,6 +213,12 @@ export default function GateScan() {
           <p className="mt-2 text-xs text-muted-foreground">
             Central gate: <span className="font-mono">CTN-SO-2026-000136</span> · Legacy: shipping QR / <span className="font-mono">CTN-YYYYMMDD-####</span> on carton only
           </p>
+
+          {scanError && (
+            <div className="mt-3 rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+              <strong>Scan failed:</strong> {scanError}
+            </div>
+          )}
 
           <div className={`mt-6 rounded-2xl border-2 p-8 text-center transition-all ${
             !ctnResult && !legacyResult ? "border-dashed border-border bg-surface-muted/30" :
