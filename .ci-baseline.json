@@ -1,0 +1,51 @@
+{
+  "baseline_date": "2026-07-24",
+  "baseline_timestamp": "2026-07-24T09:00:00Z",
+  "repository": "oasisbaklawa2006/oasis-trace",
+  "description": "Trace (Barcode and Logistics Authority) CI baseline",
+  "typescript_errors": 0,
+  "typescript_warnings": 0,
+  "build_status": "pass",
+  "test_status": "pass",
+  "eslint_errors": 192,
+  "eslint_warnings": 10,
+  "notes": "Baseline established 2026-07-24. TypeScript check: 0 errors. Build: PASS. Existing linting: 192 eslint errors (pre-existing debt, enforcing no-new-errors). CI will prevent new violations.",
+  "ci_gates": [
+    {
+      "gate": "TypeScript compilation (tsconfig.app.json)",
+      "baseline_value": 0,
+      "unit": "errors",
+      "enforcement": "no-new-errors (current <= baseline)"
+    },
+    {
+      "gate": "TypeScript compilation (tsconfig.node.json)",
+      "baseline_value": 0,
+      "unit": "errors",
+      "enforcement": "no-new-errors (current <= baseline)"
+    },
+    {
+      "gate": "Build (vite build)",
+      "baseline_value": 0,
+      "unit": "errors",
+      "enforcement": "must pass"
+    },
+    {
+      "gate": "Unit tests (vitest run)",
+      "baseline_value": 0,
+      "unit": "failures",
+      "enforcement": "must pass"
+    },
+    {
+      "gate": "ESLint (eslint .)",
+      "baseline_value": 0,
+      "unit": "errors",
+      "enforcement": "no-new-errors"
+    },
+    {
+      "gate": "Repository boundaries (check-repo-boundaries.sh)",
+      "baseline_value": 0,
+      "unit": "violations",
+      "enforcement": "no direct Supabase table access; RPC-only pattern"
+    }
+  ]
+}
