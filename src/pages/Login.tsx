@@ -63,7 +63,7 @@ export default function Login() {
         </div>
 
         <p className="mt-6 text-center text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-          Test Mode — RLS Off
+          {supabaseConfigured ? "Supabase Mode" : "Demo Mode"}
         </p>
       </div>
     </div>

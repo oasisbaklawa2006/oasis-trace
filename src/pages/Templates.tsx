@@ -1,15 +1,17 @@
 import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
-import { listTable } from "@/lib/data";
+import { listTable, insertRow } from "@/lib/data";
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { PRESET_SIZES } from "@/lib/labelSizes";
 import { LabelPreview } from "@/components/LabelPreview";
 import { generateTSPL, generateZPL, type Rotation } from "@/lib/printerCommands";
-import { Copy, Printer, RotateCw } from "lucide-react";
+import { Copy, Printer, RotateCw, Save } from "lucide-react";
 import { toast } from "sonner";
 import type { LabelTemplateRow } from "@/lib/types";
+import { errorMessage } from "@/lib/utils";
 
 export default function Templates() {
   const [templates, setTemplates] = useState<LabelTemplateRow[]>([]);
@@ -21,13 +23,48 @@ export default function Templates() {
   const [scale, setScale] = useState([1]);
   const [rotation, setRotation] = useState<Rotation>(0);
   const [showGrid, setShowGrid] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function reload() {
+    const t = await listTable<LabelTemplateRow>("ols_label_templates");
+    setTemplates(t);
+    return t;
+  }
 
   useEffect(() => { (async () => {
-    const t = await listTable<LabelTemplateRow>("ols_label_templates");
-    setTemplates(t); setActive(t[0] || null);
+    const t = await reload();
+    setActive(t[0] || null);
   })(); }, []);
 
   const size = PRESET_SIZES.find(s => s.id === sizeId)!;
+
+  async function saveAsNewTemplate() {
+    const name = newName.trim();
+    if (!name) { toast.error("Template name is required"); return; }
+    setSaving(true);
+    try {
+      const saved = await insertRow<LabelTemplateRow>("ols_label_templates", {
+        name,
+        label_type: active?.label_type || "production",
+        width_mm: size.w,
+        height_mm: size.h,
+        barcode_type: "CODE128",
+        show_qr: showQr,
+        font_scale: scale[0],
+        fields: { showSku, showWeight, showGrid, rotation },
+      });
+      await reload();
+      setActive(saved);
+      setNewName("");
+      toast.success(`Template "${saved.name}" saved`);
+    } catch (e: unknown) {
+      toast.error("Failed to save template", { description: errorMessage(e) });
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const payload = {
     widthMm: size.w, heightMm: size.h,
     title: "Cashew Pyramid Baklawa",
@@ -113,9 +150,17 @@ export default function Templates() {
             <CmdCard title="ZPL" code={generateZPL(payload)} onCopy={copy} />
           </div>
 
-          <div className="mt-4 flex gap-2">
+          <div className="mt-4 flex flex-wrap items-center gap-2">
             <Button onClick={() => window.print()}><Printer size={16} className="mr-1.5" /> Browser Print</Button>
-            <Button variant="outline">Save as new template</Button>
+            <Input
+              value={newName}
+              onChange={e => setNewName(e.target.value)}
+              placeholder="New template name…"
+              className="h-9 w-48"
+            />
+            <Button variant="outline" onClick={saveAsNewTemplate} disabled={saving}>
+              <Save size={16} className="mr-1.5" /> {saving ? "Saving…" : "Save as new template"}
+            </Button>
           </div>
         </div>
       </div>

@@ -14,6 +14,7 @@ import { StatusPill } from "@/components/StatusPill";
 import { useNavigate } from "react-router-dom";
 import type { Department, ProductCache, ProductionBatch, ProductionLabel } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
+import { generateLabelCommand, recordLabelGenerated, NO_PHYSICAL_PRINT_NOTE } from "@/lib/labelPrintLog";
 
 export default function ProductionEntry() {
   const nav = useNavigate();
@@ -87,13 +88,25 @@ export default function ProductionEntry() {
           production_label_id: label.id, from_location: "production", to_location: "store",
           movement_type: "production_inward", reference_no: batch.batch_no,
         });
-        await insertRow("ols_print_logs", { ref_type: "production_label", ref_id: label.id, success: true });
+        // Generate the TSPL command (proves GENERATED); best-effort clipboard
+        // copy. This is NOT a physical print — see labelPrintLog.ts header.
+        const { copiedToClipboard } = await generateLabelCommand({
+          widthMm: 75, heightMm: 50,
+          title: product?.name || "Production Label",
+          lines: [
+            `SKU ${product?.sku || "—"}  Batch ${form.batch_no}`,
+            `MFG ${form.mfg_date}  Shelf ${form.shelf_life_days}d`,
+            `Net ${form.net_weight || "—"} kg  Gross ${form.gross_weight || form.net_weight || "—"} kg`,
+          ],
+          barcode: labelNo,
+        });
+        await recordLabelGenerated({ refType: "production_label", refId: label.id, copiedToClipboard });
         created.push(label);
       }
       setLastBatch(created);
       setRecent(await listTable<ProductionLabel>("ols_production_labels", { order: "created_at", limit: 8 }));
-      toast.success(`Printed ${created.length} production label${created.length > 1 ? "s" : ""}`, {
-        description: "Stock inward created automatically.",
+      toast.success(`Generated ${created.length} label command${created.length > 1 ? "s" : ""}`, {
+        description: `${NO_PHYSICAL_PRINT_NOTE} Stock inward created automatically.`,
       });
       setForm(f => ({ ...f, batch_no: num.batch() }));
     } catch (err: unknown) {
@@ -155,7 +168,7 @@ export default function ProductionEntry() {
             <Field label="Remarks" className="md:col-span-2"><Textarea rows={2} value={form.remarks} onChange={e => update("remarks", e.target.value)} /></Field>
           </div>
           <div className="mt-5 flex flex-wrap gap-2">
-            <Button onClick={generate} disabled={isSubmitting} className="bg-gradient-primary text-primary-foreground shadow-elevated"><Save size={16} className="mr-1.5" /> Generate & Print Labels</Button>
+            <Button onClick={generate} disabled={isSubmitting} className="bg-gradient-primary text-primary-foreground shadow-elevated"><Save size={16} className="mr-1.5" /> Generate Label Commands</Button>
           </div>
           {submitError && (
             <div className="mt-3 rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
@@ -182,16 +195,17 @@ export default function ProductionEntry() {
 
           {lastBatch.length > 0 && (
             <div className="mt-5">
-              <p className="ols-section-title mb-2">Last batch printed</p>
+              <p className="ols-section-title mb-2">Last batch — commands generated</p>
               <ul className="space-y-1.5">
                 {lastBatch.map(l => (
                   <li key={l.id} className="flex items-center justify-between rounded-lg bg-secondary px-3 py-2 text-xs">
                     <span className="font-mono">{l.label_no}</span>
                     <span className="text-muted-foreground">{l.tray_serial}</span>
-                    <Printer size={12} className="text-success" />
+                    <Printer size={12} className="text-muted-foreground" />
                   </li>
                 ))}
               </ul>
+              <p className="mt-2 text-[10px] text-muted-foreground">{NO_PHYSICAL_PRINT_NOTE}</p>
             </div>
           )}
         </div>

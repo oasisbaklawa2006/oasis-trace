@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
@@ -12,10 +11,7 @@ import {
   isMuted, setMuted,
   isFeedbackEnabled, setFeedbackEnabled,
 } from "@/lib/scanFeedback";
-import { Volume2, VolumeX } from "lucide-react";
-
-const ROLES = ["super_admin", "qa", "hod", "store", "packing", "dispatch", "finance", "gate", "catalogue"];
-const MODULES = ["dashboard", "production_entry", "stock_units", "cartonization", "dpl", "finance_pi", "shipping", "gate_scan", "templates", "printers", "reports"];
+import { Volume2, VolumeX, ShieldAlert } from "lucide-react";
 
 export default function Settings() {
   const [vol, setVol] = useState(Math.round(getVolume() * 100));
@@ -23,27 +19,24 @@ export default function Settings() {
   const [enabled, setEnabledState] = useState(isFeedbackEnabled());
   return (
     <div>
-      <PageHeader eyebrow="Admin" title="Settings & Permissions" description="Roles × modules. Checkbox-driven permissions matrix (MVP)." />
+      <PageHeader eyebrow="Admin" title="Settings & Permissions" description="Scan feedback and system info. Role-based access control is not managed here." />
 
       <div className="grid gap-6 lg:grid-cols-3">
-        <div className="ols-card p-5 lg:col-span-2 overflow-x-auto">
-          <h3 className="mb-3 text-sm font-semibold">Permissions matrix</h3>
-          <table className="min-w-full text-sm">
-            <thead><tr><th className="px-2 py-2 text-left text-xs uppercase tracking-wider text-muted-foreground">Module</th>{ROLES.map(r => <th key={r} className="px-2 py-2 text-center text-[10px] uppercase tracking-wider text-muted-foreground">{r.replace("_", " ")}</th>)}</tr></thead>
-            <tbody>
-              {MODULES.map(m => (
-                <tr key={m} className="border-t">
-                  <td className="px-2 py-2 font-medium capitalize">{m.replace(/_/g, " ")}</td>
-                  {ROLES.map(r => (
-                    <td key={r} className="px-2 py-2 text-center">
-                      <Checkbox defaultChecked={r === "super_admin" || (m === "production_entry" && (r === "hod" || r === "qa")) || (m === "cartonization" && r === "packing") || (m === "finance_pi" && r === "finance") || (m === "gate_scan" && r === "gate")} />
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <Button className="mt-4 bg-gradient-primary text-primary-foreground" onClick={() => toast.success("Permissions saved (placeholder)")}>Save Permissions</Button>
+        <div className="ols-card p-5 lg:col-span-2">
+          <h3 className="mb-3 text-sm font-semibold">Permissions</h3>
+          <div className="flex items-start gap-2 rounded-xl border border-warning/40 bg-warning/10 p-3 text-xs text-warning-foreground">
+            <ShieldAlert size={14} className="mt-0.5 shrink-0" />
+            <div>
+              <p className="font-semibold">No frontend permissions editor here.</p>
+              <p className="mt-1 opacity-90">
+                Trace does not implement its own authorization model. Access is governed by each
+                signed-in user's Supabase JWT role claims (<code className="font-mono">ols_roles</code>) and,
+                where present, backend Row Level Security policy — both owned outside this app. A checkbox
+                matrix here would not reflect or control real access, so none is shown. See the Trace
+                forensic audit's RLS findings for the current state of role-scoped backend enforcement.
+              </p>
+            </div>
+          </div>
         </div>
 
         <div className="ols-card p-5">

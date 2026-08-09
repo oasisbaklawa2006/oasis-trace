@@ -24,6 +24,7 @@ import {
 import type { CentralScanSyncStatus } from "@/lib/centralScanStatus";
 import type { Carton, CartonContent, OrderCache, ProductionLabel } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
+import { generateLabelCommand, recordLabelGenerated, NO_PHYSICAL_PRINT_NOTE } from "@/lib/labelPrintLog";
 
 interface CartonContentWithLabel extends CartonContent {
   label?: ProductionLabel;
@@ -159,8 +160,20 @@ export default function Cartonization() {
         status: "packed", packed_at: new Date().toISOString(),
         net_weight: net, gross_weight: gross,
       });
-      await insertRow("ols_print_logs", { ref_type: "carton", ref_id: carton.id, success: true });
-      toast.success("Carton packed & label printed");
+      // Generate the TSPL command (proves GENERATED); best-effort clipboard
+      // copy. This is NOT a physical print — see labelPrintLog.ts header.
+      const { copiedToClipboard } = await generateLabelCommand({
+        widthMm: 100, heightMm: 75,
+        title: carton.customer_name || "Customer",
+        lines: [
+          `Order ${carton.order_ref || "—"}`,
+          `Carton ${carton.carton_index ?? "—"} · Items ${contents.length}`,
+          `Net ${net.toFixed(2)} kg`,
+        ],
+        barcode: barcodeDisplay?.labelBarcode || carton.carton_no,
+      });
+      await recordLabelGenerated({ refType: "carton", refId: carton.id, copiedToClipboard });
+      toast.success("Carton packed — label command generated", { description: NO_PHYSICAL_PRINT_NOTE });
       setCarton(null); setContents([]); setIdentityResult(null);
       setRecentCartons(await listTable<Carton>("ols_cartons", { order: "created_at", limit: 6 }));
     } catch (err: unknown) {
@@ -243,7 +256,7 @@ export default function Cartonization() {
             {!carton ? (
               <Button onClick={startCarton} className="bg-gradient-primary text-primary-foreground"><PackagePlus size={16} className="mr-1.5" /> Start Carton</Button>
             ) : (
-              <Button variant="outline" onClick={finalizeCarton}><Printer size={16} className="mr-1.5" /> Pack & Print Carton Label</Button>
+              <Button variant="outline" onClick={finalizeCarton}><Printer size={16} className="mr-1.5" /> Pack & Generate Carton Label</Button>
             )}
           </div>
 

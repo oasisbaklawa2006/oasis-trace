@@ -216,7 +216,10 @@ export async function printReprintAudit(range?: DateRange): Promise<Report> {
   const printRows = logs.filter(l => inRange(l.created_at, r) && l.is_reprint).map(l => ({
     when: new Date(l.created_at).toLocaleString(),
     ref_type: l.ref_type, ref_id: l.ref_id?.slice(0, 8),
-    status: l.success ? "printed" : "failed", category: l.reason || "",
+    // "generated", not "printed" — ols_print_logs.success records only that
+    // the log write succeeded / a command was generated, never physical
+    // print success. See src/lib/labelPrintLog.ts.
+    status: l.success ? "generated" : "failed", category: l.reason || "",
     approver: "", remarks: "", override: "", details: "",
   }));
   return withCap({
