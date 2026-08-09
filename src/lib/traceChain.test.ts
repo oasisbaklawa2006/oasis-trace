@@ -57,9 +57,13 @@ describe("resolveTraceChain — full seeded chain, starting from the production 
     // must win.
     const decoyData: TraceChainData = {
       ...data,
+      // Decoy first: the order_ref fallback uses .find(), so if the
+      // resolver ever regressed to checking order_ref before dpl_id, it
+      // would return dpl-DECOY here, not dpl-1 — only the real dpl_id FK
+      // can produce dpl-1 with this ordering.
       dpls: [
-        { id: "dpl-1", dpl_no: "DPL-20260511-865", order_ref: "SO-2026-0001", total_cartons: 1 },
         { id: "dpl-DECOY", dpl_no: "DPL-DECOY", order_ref: "SO-2026-0001", total_cartons: 1 },
+        { id: "dpl-1", dpl_no: "DPL-20260511-865", order_ref: "SO-2026-0001", total_cartons: 1 },
       ],
     };
     const chain = resolveTraceChain(chosen, decoyData);

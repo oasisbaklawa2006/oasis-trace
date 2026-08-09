@@ -60,10 +60,12 @@ export function resolveTraceChain(chosen: SearchDoc, data: TraceChainData): Trac
   // 3) FK: shipping.pi_id, then pi.dpl_id
   if (ship && !pi && ship.pi_id) pi = pis.find(p => p.id === ship!.pi_id);
   if (pi && !dpl && pi.dpl_id) dpl = dpls.find(d => d.id === pi!.dpl_id);
-  // 4) order_ref fallback only when no FK has resolved
-  if (carton && !pi) pi = pis.find(p => p.order_ref === carton!.order_ref);
-  if (carton && !dpl) dpl = dpls.find(d => d.order_ref === carton!.order_ref);
-  if (pi && !dpl) dpl = dpls.find(d => d.order_ref === pi!.order_ref);
+  // 4) order_ref fallback only when no FK has resolved, and only when both
+  // sides carry a truthy order_ref — an undefined-to-undefined match would
+  // silently link unrelated records.
+  if (carton?.order_ref && !pi) pi = pis.find(p => p.order_ref === carton!.order_ref);
+  if (carton?.order_ref && !dpl) dpl = dpls.find(d => d.order_ref === carton!.order_ref);
+  if (pi?.order_ref && !dpl) dpl = dpls.find(d => d.order_ref === pi!.order_ref);
 
   const labelMovements = label ? movements.filter(m => m.production_label_id === label!.id) : [];
   const gate = ship ? gateScans.find(g => g.shipping_label_id === ship!.id) : undefined;

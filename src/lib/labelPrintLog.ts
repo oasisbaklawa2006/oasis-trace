@@ -25,16 +25,39 @@ export interface GeneratedLabelResult {
 /** Generates a TSPL command for a label and best-effort copies it to the clipboard. */
 export async function generateLabelCommand(payload: LabelPayload): Promise<GeneratedLabelResult> {
   const command = generateTSPL(payload);
-  let copiedToClipboard = false;
+  const copiedToClipboard = await copyToClipboard(command);
+  return { command, copiedToClipboard };
+}
+
+export interface GeneratedLabelBatchResult {
+  commands: string[];
+  copiedToClipboard: boolean;
+}
+
+/**
+ * Generates TSPL commands for a batch of labels (e.g. multiple trays in one
+ * production run) and best-effort copies ALL of them to the clipboard as one
+ * concatenated block. Calling generateLabelCommand once per label would
+ * overwrite the clipboard each time, leaving only the last command
+ * retrievable — this exists so every generated command in a batch stays
+ * accessible to the operator.
+ */
+export async function generateLabelCommandBatch(payloads: LabelPayload[]): Promise<GeneratedLabelBatchResult> {
+  const commands = payloads.map(generateTSPL);
+  const copiedToClipboard = await copyToClipboard(commands.join("\n\n"));
+  return { commands, copiedToClipboard };
+}
+
+async function copyToClipboard(text: string): Promise<boolean> {
   try {
     if (typeof navigator !== "undefined" && navigator.clipboard) {
-      await navigator.clipboard.writeText(command);
-      copiedToClipboard = true;
+      await navigator.clipboard.writeText(text);
+      return true;
     }
   } catch {
     // Clipboard unavailable — not fatal, the command was still generated.
   }
-  return { command, copiedToClipboard };
+  return false;
 }
 
 /**

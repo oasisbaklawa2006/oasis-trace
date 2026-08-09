@@ -7,10 +7,11 @@ export function cn(...inputs: ClassValue[]) {
 
 /** Extracts a human-readable message from a caught value of unknown shape. */
 export function errorMessage(e: unknown, fallback = "Unknown error"): string {
-  if (e instanceof Error) return e.message;
-  if (typeof e === "string") return e;
+  if (e instanceof Error && e.message.trim()) return e.message;
+  if (typeof e === "string" && e.trim()) return e;
   if (e && typeof e === "object" && "message" in e && typeof (e as { message?: unknown }).message === "string") {
-    return (e as { message: string }).message;
+    const message = (e as { message: string }).message;
+    if (message.trim()) return message;
   }
   return fallback;
 }

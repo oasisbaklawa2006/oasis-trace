@@ -32,9 +32,21 @@ export default function Templates() {
     return t;
   }
 
+  function applyTemplate(t: LabelTemplateRow) {
+    setActive(t);
+    setSizeId(`${t.width_mm}x${t.height_mm}`);
+    setShowQr(!!t.show_qr);
+    setScale([t.font_scale ?? 1]);
+    const fields = t.fields as { showSku?: boolean; showWeight?: boolean; showGrid?: boolean; rotation?: Rotation } | undefined;
+    setShowSku(fields?.showSku ?? true);
+    setShowWeight(fields?.showWeight ?? true);
+    setShowGrid(fields?.showGrid ?? false);
+    setRotation(fields?.rotation ?? 0);
+  }
+
   useEffect(() => { (async () => {
     const t = await reload();
-    setActive(t[0] || null);
+    if (t[0]) applyTemplate(t[0]);
   })(); }, []);
 
   const size = PRESET_SIZES.find(s => s.id === sizeId)!;
@@ -84,7 +96,7 @@ export default function Templates() {
           <ul className="space-y-1.5">
             {templates.map(t => (
               <li key={t.id}>
-                <button onClick={() => { setActive(t); setSizeId(`${t.width_mm}x${t.height_mm}`); setShowQr(!!t.show_qr); }}
+                <button onClick={() => applyTemplate(t)}
                   className={`w-full rounded-lg border px-3 py-2 text-left text-sm ${active?.id === t.id ? "border-primary bg-primary/5" : "bg-surface"}`}>
                   <div className="flex items-center justify-between">
                     <span className="font-medium">{t.name}</span>

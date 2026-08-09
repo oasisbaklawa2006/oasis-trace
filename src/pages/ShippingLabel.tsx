@@ -36,17 +36,20 @@ export default function ShippingLabel() {
       setLabelError(null);
       setIsSubmitting(true);
       const pi = pis.find(p => p.order_ref === carton.order_ref && p.status === "cleared");
+      if (!pi) {
+        throw new Error("A cleared Finance PI is required before generating a shipping label.");
+      }
       // shipping_no and qr_ref are both randomly generated (numbering.ts)
       // and unique — retry with fresh ids on a confirmed unique-constraint
       // violation, bounded.
       const lbl = await insertWithUniqueRetry<ShippingLabelRow>("ols_shipping_labels", () => ({
         shipping_no: num.shipping(),
         carton_id: carton.id,
-        pi_id: pi?.id,
+        pi_id: pi.id,
         consignor: "Oasis Baklawa LLC",
         consignee: carton.customer_name,
         address: "—",
-        invoice_ref: pi?.invoice_ref,
+        invoice_ref: pi.invoice_ref,
         qr_ref: num.qrRef(),
         // "generated" (not "printed") — no print transport exists yet, see
         // labelPrintLog.ts. This status is otherwise only compared against

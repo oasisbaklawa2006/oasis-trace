@@ -21,6 +21,19 @@ describe("generateTSPL — dimensions and structure", () => {
     expect(cmd).toMatch(/PRINT 1,1$/);
   });
 
+  it("emits the setup commands in TSPL's required order, with CLS before any field command", () => {
+    const lines = generateTSPL({ ...basePayload, profile: { darkness: 8, speed: 4 } }).split("\n");
+    const at = (prefix: string) => lines.findIndex(l => l.startsWith(prefix));
+    expect(at("SIZE")).toBe(0);
+    expect(at("GAP")).toBeGreaterThan(at("SIZE"));
+    expect(at("DENSITY")).toBeGreaterThan(at("GAP"));
+    expect(at("SPEED")).toBeGreaterThan(at("DENSITY"));
+    expect(at("DIRECTION")).toBeGreaterThan(at("SPEED"));
+    expect(at("CLS")).toBeGreaterThan(at("DIRECTION"));
+    expect(at("CLS")).toBeLessThan(at("TEXT"));
+    expect(at("CLS")).toBeLessThan(at("BARCODE"));
+  });
+
   it("uses BLINE instead of GAP when a black-mark offset is configured", () => {
     const cmd = generateTSPL({ ...basePayload, profile: { blackMarkMm: 2 } });
     expect(cmd).toContain("BLINE 2 mm,0 mm");

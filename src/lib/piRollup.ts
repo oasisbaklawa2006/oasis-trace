@@ -32,7 +32,7 @@ export function rollupBySku(
     const sku = lbl?.metadata?.sku || it.manual_sku || "—";
     const name = lbl?.metadata?.product_name || "—";
     bySku[sku] ||= { sku, name, qty: 0, net: 0, gross: 0 };
-    bySku[sku].qty += 1;
+    bySku[sku].qty += lbl ? 1 : (it.manual_qty ?? 1);
     bySku[sku].net += lbl?.net_weight || 0;
     bySku[sku].gross += lbl?.gross_weight || 0;
   }

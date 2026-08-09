@@ -14,7 +14,7 @@ vi.mock("@/lib/data", () => ({
   }),
 }));
 
-import { generateLabelCommand, recordLabelGenerated, NO_PHYSICAL_PRINT_NOTE } from "./labelPrintLog";
+import { generateLabelCommand, generateLabelCommandBatch, recordLabelGenerated, NO_PHYSICAL_PRINT_NOTE } from "./labelPrintLog";
 
 describe("generateLabelCommand", () => {
   beforeEach(() => {
@@ -45,6 +45,36 @@ describe("generateLabelCommand", () => {
     expect(result.copiedToClipboard).toBe(false);
     // A command was still generated even though clipboard copy failed.
     expect(result.command.length).toBeGreaterThan(0);
+  });
+});
+
+describe("generateLabelCommandBatch", () => {
+  beforeEach(() => { vi.restoreAllMocks(); });
+
+  it("generates one command per payload and copies all of them in a single clipboard write", async () => {
+    const writeText = vi.fn(async (_text: string) => {});
+    Object.assign(navigator, { clipboard: { writeText } });
+    const result = await generateLabelCommandBatch([
+      { widthMm: 75, heightMm: 50, lines: [], barcode: "PL-1" },
+      { widthMm: 75, heightMm: 50, lines: [], barcode: "PL-2" },
+    ]);
+    expect(result.commands).toHaveLength(2);
+    expect(result.commands[0]).toContain("PL-1");
+    expect(result.commands[1]).toContain("PL-2");
+    expect(result.copiedToClipboard).toBe(true);
+    // A single clipboard write carrying every command, not one write per label.
+    expect(writeText).toHaveBeenCalledTimes(1);
+    const written = writeText.mock.calls[0][0];
+    expect(written).toContain("PL-1");
+    expect(written).toContain("PL-2");
+  });
+
+  it("reports clipboard failure without throwing when the clipboard API rejects", async () => {
+    const writeText = vi.fn(async () => { throw new Error("denied"); });
+    Object.assign(navigator, { clipboard: { writeText } });
+    const result = await generateLabelCommandBatch([{ widthMm: 75, heightMm: 50, lines: [], barcode: "PL-1" }]);
+    expect(result.copiedToClipboard).toBe(false);
+    expect(result.commands).toHaveLength(1);
   });
 });
 

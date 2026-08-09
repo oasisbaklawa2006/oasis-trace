@@ -17,7 +17,12 @@ export interface Report {
 function csvEscape(v: ReportCellValue): string {
   if (v == null) return "";
   const s = String(v);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  // Prefix formula-triggering leading characters so spreadsheet software
+  // (Excel, Google Sheets, LibreOffice) treats the cell as text, not a
+  // formula — prevents CSV injection from any user-entered field that ends
+  // up in an exported report.
+  const safe = /^[\t\r ]*[=+\-@]/.test(s) ? `'${s}` : s;
+  return /[",\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 }
 
 export function toCSV(report: Report): string {

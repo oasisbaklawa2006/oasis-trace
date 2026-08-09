@@ -48,8 +48,12 @@ export default function Dashboard() {
   const held = gates.filter(g => g.result === "red").length;
   const printersOnline = printers.filter(p => p.status === "online").length;
 
+  const generatedCommandsToday = todays(printLogs).filter(
+    log => log.success && log.reason?.startsWith("command_generated"),
+  ).length;
+
   const cards: CardDef[] = [
-    { label: "Label commands generated today", value: todays(printLogs).length, hint: `${printLogs.length} total`, tone: "primary", icon: Factory },
+    { label: "Label commands generated today", value: generatedCommandsToday, hint: `${printLogs.length} total`, tone: "primary", icon: Factory },
     { label: "Cartons packed today", value: todays(cartons, "packed_at").length, hint: `${cartons.length} total`, tone: "gold", icon: PackageCheck },
     { label: "Pending gate dispatch", value: pendingDispatch, hint: `${shipping.length} shipping labels`, icon: Truck },
     { label: "Reprints raised today", value: reprintsToday, hint: `${reprints.filter(r => r.status === "pending").length} pending`, icon: RotateCcw },

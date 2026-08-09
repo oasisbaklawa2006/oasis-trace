@@ -14,7 +14,7 @@ import { StatusPill } from "@/components/StatusPill";
 import { useNavigate } from "react-router-dom";
 import type { Department, ProductCache, ProductionBatch, ProductionLabel } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
-import { generateLabelCommand, recordLabelGenerated, NO_PHYSICAL_PRINT_NOTE } from "@/lib/labelPrintLog";
+import { generateLabelCommandBatch, recordLabelGenerated, NO_PHYSICAL_PRINT_NOTE } from "@/lib/labelPrintLog";
 import { buildProductionLabelPayload } from "@/lib/labelPayloads";
 import { insertWithUniqueRetry } from "@/lib/insertWithRetry";
 
@@ -67,8 +67,11 @@ export default function ProductionEntry() {
       const trayCount = Math.max(1, Number(form.tray_count));
       const created: ProductionLabel[] = [];
       for (let i = 0; i < trayCount; i++) {
-        const mfg = new Date(form.mfg_date);
-        const best = new Date(mfg); best.setDate(best.getDate() + Number(form.shelf_life_days || 0));
+        // mfg_date parses as UTC midnight; setDate() would shift by local
+        // time and can land on the wrong calendar date across a DST
+        // transition, so do the arithmetic in UTC explicitly.
+        const best = new Date(`${form.mfg_date}T00:00:00.000Z`);
+        best.setUTCDate(best.getUTCDate() + Number(form.shelf_life_days || 0));
         // label_no is randomly generated (numbering.ts) and can collide
         // under concurrent multi-terminal use — retry with a fresh id on a
         // confirmed unique-constraint violation, bounded, never unbounded.
@@ -92,15 +95,20 @@ export default function ProductionEntry() {
           production_label_id: label.id, from_location: "production", to_location: "store",
           movement_type: "production_inward", reference_no: batch.batch_no,
         });
-        // Generate the TSPL command (proves GENERATED); best-effort clipboard
-        // copy. This is NOT a physical print — see labelPrintLog.ts header.
-        const { copiedToClipboard } = await generateLabelCommand(buildProductionLabelPayload({
-          productName: product?.name, sku: product?.sku, batchNo: form.batch_no,
-          mfgDate: form.mfg_date, shelfLifeDays: form.shelf_life_days,
-          netWeight: form.net_weight, grossWeight: form.gross_weight, labelNo: label.label_no,
-        }));
-        await recordLabelGenerated({ refType: "production_label", refId: label.id, copiedToClipboard });
         created.push(label);
+      }
+      // Generate every tray's TSPL command (proves GENERATED) and best-effort
+      // copy the WHOLE batch to the clipboard as one block — copying per-tray
+      // would overwrite the clipboard each time, leaving only the last
+      // command retrievable. This is NOT a physical print — see
+      // labelPrintLog.ts header.
+      const { copiedToClipboard } = await generateLabelCommandBatch(created.map(label => buildProductionLabelPayload({
+        productName: product?.name, sku: product?.sku, batchNo: form.batch_no,
+        mfgDate: form.mfg_date, shelfLifeDays: form.shelf_life_days,
+        netWeight: form.net_weight, grossWeight: form.gross_weight, labelNo: label.label_no,
+      })));
+      for (const label of created) {
+        await recordLabelGenerated({ refType: "production_label", refId: label.id, copiedToClipboard });
       }
       setLastBatch(created);
       setRecent(await listTable<ProductionLabel>("ols_production_labels", { order: "created_at", limit: 8 }));

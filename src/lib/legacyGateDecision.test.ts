@@ -13,8 +13,11 @@ const baseEntities: LegacyGateEntities = {
 
 describe("resolveLegacyGateDecision — GREEN (allowed)", () => {
   it("allows a fully-cleared, non-dispatched carton through by QR ref", () => {
-    const { result } = resolveLegacyGateDecision("QR-ABC", baseEntities);
+    const { result, label, carton } = resolveLegacyGateDecision("QR-ABC", baseEntities);
     expect(result).toMatchObject({ kind: "green", title: "ALLOWED", ref: "CTN-001" });
+    // GateScan.tsx only persists the dispatch update when both are present.
+    expect(label?.id).toBe("ship-1");
+    expect(carton?.id).toBe("carton-1");
   });
 
   it("also matches by shipping_no, not only qr_ref", () => {

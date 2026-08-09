@@ -9,6 +9,9 @@
  * audit() helper — this file confirms both are fixed.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { PrintLogRow } from "@/lib/types";
+
+type ReprintLogFixture = Pick<PrintLogRow, "ref_type" | "ref_id" | "is_reprint">;
 
 const dataState = {
   insertShouldFail: false,
@@ -16,7 +19,7 @@ const dataState = {
   updateShouldFail: false,
   updateError: "update failed",
   inserted: [] as Array<{ table: string; row: unknown }>,
-  printLogs: [] as Array<Record<string, unknown>>,
+  printLogs: [] as ReprintLogFixture[],
 };
 
 vi.mock("@/lib/data", () => ({
