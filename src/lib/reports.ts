@@ -9,7 +9,7 @@
 //   - All listTable() calls go through a memoized loader so a single Reports
 //     session does not re-scan the same table for every report kind.
 import { listTable } from "@/lib/data";
-import type { Report, ReportCellValue } from "@/lib/exporters";
+import type { Report, ReportCellValue } from "@/lib/csvExport";
 import { parseReason } from "@/lib/reprintPolicy";
 import type {
   Carton, DplDocument, FinancePi, FinancePiCarton, GateScanRow,

@@ -1,42 +1,19 @@
-// Lightweight exporters for audit reports — CSV download, A4 print via the
-// browser print dialog, and PDF via jsPDF + autoTable.
+// PDF export via jsPDF + autoTable. Kept separate from csvExport.ts so this
+// ~200KB dependency only loads for Reports.tsx (already lazy-loaded in
+// App.tsx), not for every route that just needs CSV/print export.
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-
-export interface ReportColumn { key: string; header: string; width?: number; }
-export type ReportCellValue = string | number | boolean | Date | null | undefined;
-export interface Report {
-  title: string;
-  subtitle?: string;
-  generatedAt?: string;
-  columns: ReportColumn[];
-  rows: Record<string, ReportCellValue>[];
-  meta?: { truncated?: boolean; total?: number; cap?: number; [key: string]: unknown };
-}
-
-function csvEscape(v: ReportCellValue): string {
-  if (v == null) return "";
-  const s = String(v);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
-
-export function toCSV(report: Report): string {
-  const header = report.columns.map(c => csvEscape(c.header)).join(",");
-  const lines = report.rows.map(r => report.columns.map(c => csvEscape(r[c.key])).join(","));
-  return [header, ...lines].join("\n");
-}
-
-export function downloadCSV(report: Report, filename?: string) {
-  const csv = toCSV(report);
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = filename || `${slug(report.title)}.csv`;
-  document.body.appendChild(a); a.click(); a.remove();
-  URL.revokeObjectURL(url);
-}
+import type { Report, ReportCellValue } from "@/lib/csvExport";
+import { slug } from "@/lib/csvExport";
 
 export type Watermark = "INTERNAL" | "VERIFIED" | "DRAFT" | "DUPLICATE COPY" | (string & {});
+
+function fmt(v: ReportCellValue): string {
+  if (v == null) return "";
+  if (typeof v === "number") return Number.isInteger(v) ? String(v) : v.toFixed(2);
+  if (v instanceof Date) return v.toLocaleString();
+  return String(v);
+}
 
 export function exportPDF(report: Report, opts?: { filename?: string; watermark?: Watermark }) {
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
@@ -86,17 +63,4 @@ export function exportPDF(report: Report, opts?: { filename?: string; watermark?
     },
   });
   doc.save(opts?.filename || `${slug(report.title)}.pdf`);
-}
-
-export function printA4() { window.print(); }
-
-function fmt(v: ReportCellValue): string {
-  if (v == null) return "";
-  if (typeof v === "number") return Number.isInteger(v) ? String(v) : v.toFixed(2);
-  if (v instanceof Date) return v.toLocaleString();
-  return String(v);
-}
-
-function slug(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }

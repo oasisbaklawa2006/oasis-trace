@@ -102,7 +102,7 @@ export default function Templates() {
               <label className="mb-1 block text-xs text-muted-foreground">Preset size</label>
               <div className="flex flex-wrap gap-1.5">
                 {PRESET_SIZES.map(s => (
-                  <button key={s.id} onClick={() => setSizeId(s.id)} className={`rounded-md border px-2 py-1 text-xs ${sizeId === s.id ? "border-primary bg-primary text-primary-foreground" : "bg-surface"}`}>
+                  <button key={s.id} onClick={() => setSizeId(s.id)} aria-pressed={sizeId === s.id} className={`rounded-md border px-2 py-1 text-xs ${sizeId === s.id ? "border-primary bg-primary text-primary-foreground" : "bg-surface"}`}>
                     {s.label}
                   </button>
                 ))}
@@ -120,7 +120,7 @@ export default function Templates() {
               <div className="mb-1 flex justify-between text-xs"><span className="text-muted-foreground">Rotation</span><span className="font-mono">{rotation}°</span></div>
               <div className="flex gap-1">
                 {[0, 90, 180, 270].map(r => (
-                  <button key={r} onClick={() => setRotation(r as Rotation)} className={`flex-1 rounded-md border px-2 py-1 text-xs ${rotation === r ? "border-primary bg-primary text-primary-foreground" : "bg-surface"}`}>
+                  <button key={r} onClick={() => setRotation(r as Rotation)} aria-pressed={rotation === r} className={`flex-1 rounded-md border px-2 py-1 text-xs ${rotation === r ? "border-primary bg-primary text-primary-foreground" : "bg-surface"}`}>
                     <RotateCw size={10} className="inline mr-1" />{r}°
                   </button>
                 ))}

@@ -8,7 +8,7 @@ import { StatusPill } from "@/components/StatusPill";
 import { EmptyState } from "@/components/EmptyState";
 import { cn } from "@/lib/utils";
 import { buildIndex, search, recentSearches, pushRecent, KIND_LABEL, type SearchDoc } from "@/lib/traceSearch";
-import { downloadCSV } from "@/lib/exporters";
+import { downloadCSV } from "@/lib/csvExport";
 import { toast } from "sonner";
 import type { LucideIcon } from "lucide-react";
 import type {
@@ -95,6 +95,7 @@ export default function Traceability() {
               onChange={e => { setQ(e.target.value); setChosen(null); }}
               onKeyDown={e => { if (e.key === "Enter" && results[0]) pick(results[0]); }}
               placeholder="Type a barcode, SKU, batch, order, invoice, customer, QR…"
+              aria-label="Traceability search"
               className={cn("font-mono", quickScan && "h-14 text-lg")}
               autoFocus
             />

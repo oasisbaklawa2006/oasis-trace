@@ -13,6 +13,7 @@ import { StatusPill } from "@/components/StatusPill";
 import type { Carton, CartonContent, DplDocument, OrderCache, ProductionLabel } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
 import { rollupBySku } from "@/lib/piRollup";
+import { insertWithUniqueRetry } from "@/lib/insertWithRetry";
 
 export default function DPL() {
   const [orders, setOrders] = useState<OrderCache[]>([]);
@@ -47,7 +48,10 @@ export default function DPL() {
         gross: acc.gross + (c.gross_weight || 0),
         net: acc.net + (c.net_weight || 0),
       }), { gross: 0, net: 0 });
-      const dpl = await insertRow<DplDocument>("ols_dpl_documents", {
+      // dpl_no is randomly generated (numbering.ts) and can collide under
+      // concurrent multi-terminal use — retry with a fresh id on a
+      // confirmed unique-constraint violation, bounded.
+      const dpl = await insertWithUniqueRetry<DplDocument>("ols_dpl_documents", () => ({
         dpl_no: num.dpl(),
         order_ref: orderRef,
         customer_name: order?.customer_name,
@@ -57,7 +61,7 @@ export default function DPL() {
         total_gross: totals.gross,
         total_net: totals.net,
         status: "open",
-      });
+      }));
       for (let i = 0; i < cartonsForOrder.length; i++) {
         await insertRow("ols_dpl_cartons", { dpl_id: dpl.id, carton_id: cartonsForOrder[i].id, position: i + 1 });
       }

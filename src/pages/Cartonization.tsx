@@ -26,6 +26,7 @@ import type { Carton, CartonContent, OrderCache, ProductionLabel } from "@/lib/t
 import { errorMessage } from "@/lib/utils";
 import { generateLabelCommand, recordLabelGenerated, NO_PHYSICAL_PRINT_NOTE } from "@/lib/labelPrintLog";
 import { buildCartonLabelPayload } from "@/lib/labelPayloads";
+import { insertWithUniqueRetry } from "@/lib/insertWithRetry";
 
 interface CartonContentWithLabel extends CartonContent {
   label?: ProductionLabel;
@@ -67,26 +68,30 @@ export default function Cartonization() {
       setCartonError(null);
       if (!orderRef) { toast.error("Pick an order first"); return; }
       const order = orders.find(o => o.order_number === orderRef);
-      const legacyNo = num.carton();
-      const metadata = buildCartonMetadata(orderRef, legacyNo);
-      const c = await insertRow<Carton>("ols_cartons", {
-        carton_no: legacyNo,
-        order_ref: orderRef,
-        customer_code: order?.customer_code,
-        customer_name: order?.customer_name,
-        status: "draft",
-        carton_index: (recentCartons.filter(r => r.order_ref === orderRef).length) + 1,
-        metadata,
+      // carton_no is randomly generated (numbering.ts) and can collide under
+      // concurrent multi-terminal use — retry with a fresh id (and matching
+      // metadata) on a confirmed unique-constraint violation, bounded.
+      const c = await insertWithUniqueRetry<Carton>("ols_cartons", () => {
+        const legacyNo = num.carton();
+        return {
+          carton_no: legacyNo,
+          order_ref: orderRef,
+          customer_code: order?.customer_code,
+          customer_name: order?.customer_name,
+          status: "draft",
+          carton_index: (recentCartons.filter(r => r.order_ref === orderRef).length) + 1,
+          metadata: buildCartonMetadata(orderRef, legacyNo),
+        };
       });
       setCarton(c);
       setContents([]);
       setIdentityResult(null);
       setSubmitResult(null);
-      const display = resolveCartonBarcodeDisplay(orderRef, legacyNo, metadata);
+      const display = resolveCartonBarcodeDisplay(orderRef, c.carton_no, c.metadata);
       if (display.centralBarcode) {
         toast.success(`Carton started · Central barcode ${display.centralBarcode}`);
       } else {
-        toast.success(`Carton ${legacyNo} created (legacy/local barcode)`);
+        toast.success(`Carton ${c.carton_no} created (legacy/local barcode)`);
       }
     } catch (err: unknown) {
       const msg = errorMessage(err, "Failed to create carton");
@@ -287,6 +292,7 @@ export default function Cartonization() {
                   <div className="flex gap-2">
                     <Input
                       placeholder="Scan CTN-SO order barcode…"
+                      aria-label="Carton identity barcode input"
                       value={identityScan}
                       onChange={e => setIdentityScan(e.target.value)}
                       onKeyDown={e => e.key === "Enter" && verifyCartonIdentity()}
@@ -318,6 +324,7 @@ export default function Cartonization() {
               <div className="mt-4 flex gap-2">
                 <Input
                   placeholder="Scan or type production label number…"
+                  aria-label="Production label barcode input"
                   value={scanInput}
                   onChange={e => setScanInput(e.target.value)}
                   onKeyDown={e => e.key === "Enter" && scanLabel()}

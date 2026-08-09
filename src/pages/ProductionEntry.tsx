@@ -16,6 +16,7 @@ import type { Department, ProductCache, ProductionBatch, ProductionLabel } from 
 import { errorMessage } from "@/lib/utils";
 import { generateLabelCommand, recordLabelGenerated, NO_PHYSICAL_PRINT_NOTE } from "@/lib/labelPrintLog";
 import { buildProductionLabelPayload } from "@/lib/labelPayloads";
+import { insertWithUniqueRetry } from "@/lib/insertWithRetry";
 
 export default function ProductionEntry() {
   const nav = useNavigate();
@@ -66,11 +67,13 @@ export default function ProductionEntry() {
       const trayCount = Math.max(1, Number(form.tray_count));
       const created: ProductionLabel[] = [];
       for (let i = 0; i < trayCount; i++) {
-        const labelNo = num.productionLabel();
         const mfg = new Date(form.mfg_date);
         const best = new Date(mfg); best.setDate(best.getDate() + Number(form.shelf_life_days || 0));
-        const label = await insertRow<ProductionLabel>("ols_production_labels", {
-          label_no: labelNo,
+        // label_no is randomly generated (numbering.ts) and can collide
+        // under concurrent multi-terminal use — retry with a fresh id on a
+        // confirmed unique-constraint violation, bounded, never unbounded.
+        const label = await insertWithUniqueRetry<ProductionLabel>("ols_production_labels", () => ({
+          label_no: num.productionLabel(),
           batch_id: batch.id,
           product_id: form.product_id,
           department_id: form.department_id,
@@ -83,7 +86,7 @@ export default function ProductionEntry() {
           operator_name: form.operator_name,
           status: "active",
           metadata: { product_name: product?.name, sku: product?.sku, department: departments.find(d => d.id === form.department_id)?.name },
-        });
+        }));
         await insertRow("ols_stock_units", { production_label_id: label.id, current_location: "store", current_status: "in_stock" });
         await insertRow("ols_inventory_movements", {
           production_label_id: label.id, from_location: "production", to_location: "store",
@@ -94,7 +97,7 @@ export default function ProductionEntry() {
         const { copiedToClipboard } = await generateLabelCommand(buildProductionLabelPayload({
           productName: product?.name, sku: product?.sku, batchNo: form.batch_no,
           mfgDate: form.mfg_date, shelfLifeDays: form.shelf_life_days,
-          netWeight: form.net_weight, grossWeight: form.gross_weight, labelNo,
+          netWeight: form.net_weight, grossWeight: form.gross_weight, labelNo: label.label_no,
         }));
         await recordLabelGenerated({ refType: "production_label", refId: label.id, copiedToClipboard });
         created.push(label);

@@ -6,12 +6,13 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { listTable, insertRow, updateRow } from "@/lib/data";
 import { num } from "@/lib/numbering";
-import { ScanBarcode, BadgeCheck } from "lucide-react";
+import { ScanBarcode, BadgeCheck, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { StatusPill } from "@/components/StatusPill";
 import type { Carton, CartonContent, DplCarton, FinancePi, FinancePiCarton, ProductionLabel } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
 import { rollupBySku } from "@/lib/piRollup";
+import { insertWithUniqueRetry } from "@/lib/insertWithRetry";
 
 export default function FinancePI() {
   const [cartons, setCartons] = useState<Carton[]>([]);
@@ -52,13 +53,16 @@ export default function FinancePI() {
         // and relying on the order_ref heuristic downstream (Traceability,
         // reports.ts) to reconnect PI <-> DPL after the fact.
         const dplLink = dplCartons.find(dc => dc.carton_id === c.id);
-        pi = await insertRow<FinancePi>("ols_finance_pi", {
+        // pi_no is randomly generated (numbering.ts) and can collide under
+        // concurrent multi-terminal use — retry with a fresh id on a
+        // confirmed unique-constraint violation, bounded.
+        pi = await insertWithUniqueRetry<FinancePi>("ols_finance_pi", () => ({
           pi_no: num.pi(),
           dpl_id: dplLink?.dpl_id,
           order_ref: c.order_ref,
           customer_name: c.customer_name,
           status: "pending",
-        });
+        }));
         setActive(pi);
         setPis(prev => [pi as FinancePi, ...prev]);
       }
@@ -124,7 +128,7 @@ export default function FinancePI() {
             <Input
               value={scan} onChange={e => setScan(e.target.value)}
               onKeyDown={e => e.key === "Enter" && scanCarton()}
-              placeholder="Scan carton barcode…" className="font-mono" autoFocus
+              placeholder="Scan carton barcode…" aria-label="Carton barcode input" className="font-mono" autoFocus
             />
             <Button onClick={scanCarton} disabled={isSubmitting}><ScanBarcode size={16} /></Button>
           </div>
@@ -206,7 +210,13 @@ export default function FinancePI() {
                     ))}
                   </tbody>
                 </table>
-                <p className="mt-3 text-[11px] text-muted-foreground">Difference engine placeholder — will compare against original order quantities once order data is connected.</p>
+                <p className="mt-3 flex items-start gap-1.5 text-[11px] text-warning-foreground/80">
+                  <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+                  Cannot compare against original order quantities — Trace does not own or read per-SKU
+                  order line items (only order/customer identity is cached here; Sales Order line data is
+                  Central's domain). This comparison would require a genuine backend data contract from
+                  Central, which does not exist yet.
+                </p>
               </TabsContent>
             </Tabs>
           )}

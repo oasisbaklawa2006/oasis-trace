@@ -12,6 +12,7 @@ import type { Carton, FinancePi, ShippingLabelRow } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
 import { generateLabelCommand, recordLabelGenerated, NO_PHYSICAL_PRINT_NOTE } from "@/lib/labelPrintLog";
 import { buildShippingLabelPayload } from "@/lib/labelPayloads";
+import { insertWithUniqueRetry } from "@/lib/insertWithRetry";
 
 export default function ShippingLabel() {
   const [cartons, setCartons] = useState<Carton[]>([]);
@@ -35,27 +36,28 @@ export default function ShippingLabel() {
       setLabelError(null);
       setIsSubmitting(true);
       const pi = pis.find(p => p.order_ref === carton.order_ref && p.status === "cleared");
-      const qrRef = num.qrRef();
-      const shippingNo = num.shipping();
-      const lbl = await insertRow<ShippingLabelRow>("ols_shipping_labels", {
-        shipping_no: shippingNo,
+      // shipping_no and qr_ref are both randomly generated (numbering.ts)
+      // and unique — retry with fresh ids on a confirmed unique-constraint
+      // violation, bounded.
+      const lbl = await insertWithUniqueRetry<ShippingLabelRow>("ols_shipping_labels", () => ({
+        shipping_no: num.shipping(),
         carton_id: carton.id,
         pi_id: pi?.id,
         consignor: "Oasis Baklawa LLC",
         consignee: carton.customer_name,
         address: "—",
         invoice_ref: pi?.invoice_ref,
-        qr_ref: qrRef,
+        qr_ref: num.qrRef(),
         // "generated" (not "printed") — no print transport exists yet, see
         // labelPrintLog.ts. This status is otherwise only compared against
         // "dispatched" downstream (GateScan), so this rename is safe.
         status: "generated",
-      });
+      }));
       await updateRow("ols_cartons", carton.id, { status: "shipping_labelled" });
       // Generate the TSPL command (proves GENERATED); best-effort clipboard
       // copy. This is NOT a physical print — see labelPrintLog.ts header.
       const { copiedToClipboard } = await generateLabelCommand(buildShippingLabelPayload({
-        consignee: carton.customer_name, invoiceRef: pi?.invoice_ref, shippingNo, qrRef,
+        consignee: carton.customer_name, invoiceRef: pi?.invoice_ref, shippingNo: lbl.shipping_no, qrRef: lbl.qr_ref,
       }));
       await recordLabelGenerated({ refType: "shipping", refId: lbl.id, copiedToClipboard });
       toast.success(`Shipping label ${lbl.shipping_no} — command generated`, { description: NO_PHYSICAL_PRINT_NOTE });

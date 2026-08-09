@@ -189,6 +189,7 @@ export default function GateScan() {
               ref={inputRef} value={scan} onChange={e => setScan(e.target.value)}
               onKeyDown={e => e.key === "Enter" && check()}
               placeholder="Scan CTN-SO-* or shipping QR…"
+              aria-label="Gate scan barcode input"
               className="h-14 font-mono text-lg"
             />
             <Button onClick={check} className="h-14 px-6 bg-gradient-primary text-primary-foreground"><ScanLine size={20} /></Button>
@@ -207,10 +208,14 @@ export default function GateScan() {
             </div>
           )}
 
-          <div className={`mt-6 rounded-2xl border-2 p-8 text-center transition-all ${
-            !ctnResult && !legacyResult ? "border-dashed border-border bg-surface-muted/30" :
-            showGreen ? "border-success bg-success/10" : "border-destructive bg-destructive/10"
-          }`}>
+          <div
+            role="status"
+            aria-live="polite"
+            className={`mt-6 rounded-2xl border-2 p-8 text-center transition-all ${
+              !ctnResult && !legacyResult ? "border-dashed border-border bg-surface-muted/30" :
+              showGreen ? "border-success bg-success/10" : "border-destructive bg-destructive/10"
+            }`}
+          >
             {!ctnResult && !legacyResult ? (
               <p className="text-sm text-muted-foreground">Awaiting scan…</p>
             ) : showGreen ? (
