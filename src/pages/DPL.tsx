@@ -10,10 +10,11 @@ import { toast } from "sonner";
 import { Barcode } from "@/components/Barcode";
 import { PrintSheet } from "@/components/PrintSheet";
 import { StatusPill } from "@/components/StatusPill";
-import type { Carton, CartonContent, DplDocument, OrderCache, ProductionLabel } from "@/lib/types";
+import type { Carton, CartonContent, DplCarton, DplDocument, OrderCache, ProductionLabel } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
 import { rollupBySku } from "@/lib/piRollup";
 import { insertWithUniqueRetry } from "@/lib/insertWithRetry";
+import { resolveDplMemberCartons } from "@/lib/dplMembership";
 
 export default function DPL() {
   const [orders, setOrders] = useState<OrderCache[]>([]);
@@ -22,6 +23,7 @@ export default function DPL() {
   const [labels, setLabels] = useState<ProductionLabel[]>([]);
   const [orderRef, setOrderRef] = useState("");
   const [dpls, setDpls] = useState<DplDocument[]>([]);
+  const [dplCartons, setDplCartons] = useState<DplCarton[]>([]);
   const [active, setActive] = useState<DplDocument | null>(null);
   const [activeCartons, setActiveCartons] = useState<Carton[]>([]);
   const [dplError, setDplError] = useState<string | null>(null);
@@ -33,6 +35,8 @@ export default function DPL() {
     setContents(await listTable<CartonContent>("ols_carton_contents"));
     setLabels(await listTable<ProductionLabel>("ols_production_labels"));
     setDpls(await listTable<DplDocument>("ols_dpl_documents", { order: "created_at" }));
+    // Real FK source for DPL <-> carton membership — see dplMembership.ts.
+    setDplCartons(await listTable<DplCarton>("ols_dpl_cartons"));
   })(); }, []);
 
   const cartonsForOrder = cartons.filter(c => c.order_ref === orderRef && c.status === "packed");
@@ -62,11 +66,17 @@ export default function DPL() {
         total_net: totals.net,
         status: "open",
       }));
+      const newLinks: DplCarton[] = [];
       for (let i = 0; i < cartonsForOrder.length; i++) {
-        await insertRow("ols_dpl_cartons", { dpl_id: dpl.id, carton_id: cartonsForOrder[i].id, position: i + 1 });
+        newLinks.push(await insertRow<DplCarton>("ols_dpl_cartons", { dpl_id: dpl.id, carton_id: cartonsForOrder[i].id, position: i + 1 }));
       }
+      setDplCartons(prev => [...prev, ...newLinks]);
       setDpls(await listTable<DplDocument>("ols_dpl_documents", { order: "created_at" }));
-      openDpl(dpl);
+      // All of cartonsForOrder were just linked to dpl.id above by
+      // construction — use them directly rather than the just-updated
+      // dplCartons state, which the next render hasn't committed yet.
+      setActive(dpl);
+      setActiveCartons(cartonsForOrder);
       toast.success(`DPL ${dpl.dpl_no} created with ${cartonsForOrder.length} cartons`);
     } catch (err: unknown) {
       const msg = errorMessage(err, "Failed to generate DPL");
@@ -79,8 +89,9 @@ export default function DPL() {
 
   function openDpl(d: DplDocument) {
     setActive(d);
-    const linked = cartons.filter(c => c.order_ref === d.order_ref && c.status !== "draft");
-    setActiveCartons(linked);
+    // FK-first: only cartons genuinely linked via ols_dpl_cartons, never
+    // inferred from a shared order_ref (requirement 4).
+    setActiveCartons(resolveDplMemberCartons(d.id, dplCartons, cartons));
   }
 
   function cartonSummary(cartonId: string) {

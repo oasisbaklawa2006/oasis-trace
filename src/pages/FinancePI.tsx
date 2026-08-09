@@ -13,6 +13,7 @@ import type { Carton, CartonContent, DplCarton, FinancePi, FinancePiCarton, Prod
 import { errorMessage } from "@/lib/utils";
 import { rollupBySku } from "@/lib/piRollup";
 import { insertWithUniqueRetry } from "@/lib/insertWithRetry";
+import { validateCartonForPi } from "@/lib/dplMembership";
 
 export default function FinancePI() {
   const [cartons, setCartons] = useState<Carton[]>([]);
@@ -46,19 +47,23 @@ export default function FinancePI() {
       if (!code) return;
       const c = cartons.find(x => x.carton_no === code);
       if (!c) { toast.error("Carton not found"); return; }
+
+      // ols_dpl_cartons is the authoritative DPL membership — a carton must
+      // genuinely be linked to a DPL to enter a Finance PI (fail closed),
+      // and once this PI is committed to a DPL (from its first carton) every
+      // later carton must belong to that same DPL. Never inferred from
+      // order_ref — see dplMembership.ts.
+      const membership = validateCartonForPi(c.id, active?.dpl_id, dplCartons);
+      if (!membership.ok) { toast.error(membership.reason || "Carton rejected"); setScan(""); return; }
+
       let pi = active;
       if (!pi) {
-        // Real FK: if this carton is already on a DPL, link the PI to that
-        // DPL directly via ols_dpl_cartons rather than leaving dpl_id null
-        // and relying on the order_ref heuristic downstream (Traceability,
-        // reports.ts) to reconnect PI <-> DPL after the fact.
-        const dplLink = dplCartons.find(dc => dc.carton_id === c.id);
         // pi_no is randomly generated (numbering.ts) and can collide under
         // concurrent multi-terminal use — retry with a fresh id on a
         // confirmed unique-constraint violation, bounded.
         pi = await insertWithUniqueRetry<FinancePi>("ols_finance_pi", () => ({
           pi_no: num.pi(),
-          dpl_id: dplLink?.dpl_id,
+          dpl_id: membership.dplId,
           order_ref: c.order_ref,
           customer_name: c.customer_name,
           status: "pending",
