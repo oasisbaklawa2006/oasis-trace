@@ -17,6 +17,7 @@ import { errorMessage } from "@/lib/utils";
 import { generateLabelCommandBatch, recordLabelGenerated, NO_PHYSICAL_PRINT_NOTE } from "@/lib/labelPrintLog";
 import { buildProductionLabelPayload } from "@/lib/labelPayloads";
 import { insertWithUniqueRetry } from "@/lib/insertWithRetry";
+import { computeBestBefore } from "@/lib/dateMath";
 
 export default function ProductionEntry() {
   const nav = useNavigate();
@@ -65,13 +66,9 @@ export default function ProductionEntry() {
         remarks: form.remarks,
       });
       const trayCount = Math.max(1, Number(form.tray_count));
+      const bestBefore = computeBestBefore(form.mfg_date, Number(form.shelf_life_days || 0));
       const created: ProductionLabel[] = [];
       for (let i = 0; i < trayCount; i++) {
-        // mfg_date parses as UTC midnight; setDate() would shift by local
-        // time and can land on the wrong calendar date across a DST
-        // transition, so do the arithmetic in UTC explicitly.
-        const best = new Date(`${form.mfg_date}T00:00:00.000Z`);
-        best.setUTCDate(best.getUTCDate() + Number(form.shelf_life_days || 0));
         // label_no is randomly generated (numbering.ts) and can collide
         // under concurrent multi-terminal use — retry with a fresh id on a
         // confirmed unique-constraint violation, bounded, never unbounded.
@@ -84,7 +81,7 @@ export default function ProductionEntry() {
           net_weight: Number(form.net_weight),
           gross_weight: Number(form.gross_weight || form.net_weight),
           mfg_date: form.mfg_date,
-          best_before: best.toISOString().slice(0, 10),
+          best_before: bestBefore,
           qc_status: form.qc_status,
           operator_name: form.operator_name,
           status: "active",
