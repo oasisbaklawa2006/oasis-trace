@@ -45,19 +45,27 @@ jobs:
           VALIDATE_GITHUB_ACTIONS: true
           VALIDATE_JAVASCRIPT_ES: true
           VALIDATE_JSON: true
-          # Disabled: Super-Linter's isolated TYPESCRIPT_ES run does not use
-          # this repo's eslint.config.js (confirmed — it enforces rules like
-          # @typescript-eslint/no-unused-vars that our config explicitly
-          # turns off, and applies n/no-missing-import, a rule from
-          # eslint-plugin-n that isn't in our config at all). It can't
-          # resolve the @/* path aliases from tsconfig/vite.config.ts either
-          # way, so every internal import is reported as unresolvable, and it
-          # flags standard browser APIs (localStorage, navigator, crypto,
-          # Blob, URL) as unsupported Node.js builtins since it lints this
-          # browser-only frontend as if it were a Node target. All ~150
-          # findings under this validator were confirmed false positives
-          # against code that `npm run lint` (this repo's own ESLint config,
-          # run with dependencies installed in ci.yml) already passes with 0
-          # errors — that job is the authoritative TS/JS lint gate.
-          VALIDATE_TYPESCRIPT_ES: false
+          # TYPESCRIPT_ES intentionally omitted (not set to false): setting
+          # any VALIDATE_* to true switches Super-Linter into "include mode",
+          # where every unset validator is skipped automatically. Explicitly
+          # setting VALIDATE_TYPESCRIPT_ES: false alongside other
+          # VALIDATE_*: true flags mixes include and exclude semantics, which
+          # Super-Linter rejects outright ("Behavior not supported, please
+          # either only include or exclude linters, but not both").
+          #
+          # TYPESCRIPT_ES is left out because Super-Linter's isolated run
+          # does not use this repo's eslint.config.js (confirmed — it
+          # enforces rules like @typescript-eslint/no-unused-vars that our
+          # config explicitly turns off, and applies n/no-missing-import, a
+          # rule from eslint-plugin-n that isn't in our config at all). It
+          # can't resolve the @/* path aliases from tsconfig/vite.config.ts
+          # either way, so every internal import is reported as
+          # unresolvable, and it flags standard browser APIs (localStorage,
+          # navigator, crypto, Blob, URL) as unsupported Node.js builtins
+          # since it lints this browser-only frontend as if it were a Node
+          # target. All ~150 findings under this validator were confirmed
+          # false positives against code that `npm run lint` (this repo's
+          # own ESLint config, run with dependencies installed in ci.yml)
+          # already passes with 0 errors — that job is the authoritative
+          # TS/JS lint gate.
           VALIDATE_YAML: true
