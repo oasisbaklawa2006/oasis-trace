@@ -10,7 +10,7 @@ const orders = [
   { id: "order-uuid-2", order_number: "SO-2026-0002" },
 ];
 
-const mockState = { scanHistory: [] as Record<string, unknown>[] };
+const mockState = { scanHistory: [] as Record<string, unknown>[], gateScans: [] as Record<string, unknown>[] };
 
 vi.mock("@/lib/data", () => ({
   listTable: vi.fn(async (table: string) => {
@@ -23,6 +23,11 @@ vi.mock("@/lib/data", () => ({
       mockState.scanHistory.push(full);
       return full;
     }
+    if (table === "ols_gate_scans") {
+      const full = { id: crypto.randomUUID(), ...row };
+      mockState.gateScans.push(full);
+      return full;
+    }
     return row;
   }),
   isDuplicateError: vi.fn(),
@@ -31,6 +36,7 @@ vi.mock("@/lib/data", () => ({
 describe("processDispatchGateCtnSoScan", () => {
   beforeEach(() => {
     mockState.scanHistory = [];
+    mockState.gateScans = [];
   });
 
   it("returns dispatch_gate payload on verified scan", async () => {
@@ -61,6 +67,42 @@ describe("processDispatchGateCtnSoScan", () => {
     expect(dup.ok).toBe(false);
     expect(dup.duplicate).toBe(true);
     expect(dup.userMessage).toBe("Scan already recorded");
+  });
+
+  it("leaves shipping_label_id unset when no resolution context is given", async () => {
+    await processDispatchGateCtnSoScan("CTN-SO-2026-0001", orders);
+    expect(mockState.gateScans).toHaveLength(1);
+    expect(mockState.gateScans[0].shipping_label_id).toBeUndefined();
+  });
+
+  it("resolves shipping_label_id when the order has exactly one shipping label (real FK, not a guess)", async () => {
+    const ctx = {
+      cartons: [{ id: "carton-1", order_ref: "SO-2026-0001" }],
+      shippingLabels: [{ id: "ship-1", carton_id: "carton-1" }],
+    };
+    await processDispatchGateCtnSoScan("CTN-SO-2026-0001", orders, ctx);
+    expect(mockState.gateScans[0].shipping_label_id).toBe("ship-1");
+  });
+
+  it("leaves shipping_label_id unset (never guesses) when the order has multiple shipping labels", async () => {
+    const ctx = {
+      cartons: [
+        { id: "carton-1", order_ref: "SO-2026-0001" },
+        { id: "carton-2", order_ref: "SO-2026-0001" },
+      ],
+      shippingLabels: [
+        { id: "ship-1", carton_id: "carton-1" },
+        { id: "ship-2", carton_id: "carton-2" },
+      ],
+    };
+    await processDispatchGateCtnSoScan("CTN-SO-2026-0001", orders, ctx);
+    expect(mockState.gateScans[0].shipping_label_id).toBeUndefined();
+  });
+
+  it("leaves shipping_label_id unset when the order has no shipping labels yet", async () => {
+    const ctx = { cartons: [{ id: "carton-1", order_ref: "SO-2026-0001" }], shippingLabels: [] };
+    await processDispatchGateCtnSoScan("CTN-SO-2026-0001", orders, ctx);
+    expect(mockState.gateScans[0].shipping_label_id).toBeUndefined();
   });
 });
 

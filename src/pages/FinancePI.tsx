@@ -9,7 +9,7 @@ import { num } from "@/lib/numbering";
 import { ScanBarcode, BadgeCheck } from "lucide-react";
 import { toast } from "sonner";
 import { StatusPill } from "@/components/StatusPill";
-import type { Carton, CartonContent, FinancePi, FinancePiCarton, ProductionLabel } from "@/lib/types";
+import type { Carton, CartonContent, DplCarton, FinancePi, FinancePiCarton, ProductionLabel } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
 
 export default function FinancePI() {
@@ -18,6 +18,7 @@ export default function FinancePI() {
   const [labels, setLabels] = useState<ProductionLabel[]>([]);
   const [pis, setPis] = useState<FinancePi[]>([]);
   const [piCartons, setPiCartons] = useState<FinancePiCarton[]>([]);
+  const [dplCartons, setDplCartons] = useState<DplCarton[]>([]);
   const [scan, setScan] = useState("");
   const [active, setActive] = useState<FinancePi | null>(null);
   const [invoiceRef, setInvoiceRef] = useState("");
@@ -31,6 +32,9 @@ export default function FinancePI() {
     setLabels(await listTable<ProductionLabel>("ols_production_labels"));
     setPis(await listTable<FinancePi>("ols_finance_pi", { order: "created_at" }));
     setPiCartons(await listTable<FinancePiCarton>("ols_finance_pi_cartons"));
+    // Real FK source for PI -> DPL linkage (see scanCarton): a carton's DPL
+    // membership, not the order_ref heuristic.
+    setDplCartons(await listTable<DplCarton>("ols_dpl_cartons"));
   }
 
   async function scanCarton() {
@@ -42,8 +46,14 @@ export default function FinancePI() {
       if (!c) { toast.error("Carton not found"); return; }
       let pi = active;
       if (!pi) {
+        // Real FK: if this carton is already on a DPL, link the PI to that
+        // DPL directly via ols_dpl_cartons rather than leaving dpl_id null
+        // and relying on the order_ref heuristic downstream (Traceability,
+        // reports.ts) to reconnect PI <-> DPL after the fact.
+        const dplLink = dplCartons.find(dc => dc.carton_id === c.id);
         pi = await insertRow<FinancePi>("ols_finance_pi", {
           pi_no: num.pi(),
+          dpl_id: dplLink?.dpl_id,
           order_ref: c.order_ref,
           customer_name: c.customer_name,
           status: "pending",

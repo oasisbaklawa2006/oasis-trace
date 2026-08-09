@@ -109,7 +109,7 @@ export default function GateScan() {
       setSubmitResult(null);
 
       if (kind === "central") {
-        const flow = await processDispatchGateCtnSoScan(ref, orders);
+        const flow = await processDispatchGateCtnSoScan(ref, orders, { cartons, shippingLabels: labels });
         setCtnResult(flow);
         setSubmitResult(null);
         if (flow.duplicate) {

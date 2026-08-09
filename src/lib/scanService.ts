@@ -21,6 +21,26 @@ export interface OrderRef {
   order_number: string;
 }
 
+export interface GateResolutionContext {
+  cartons: Array<{ id: string; order_ref?: string }>;
+  shippingLabels: Array<{ id: string; carton_id?: string }>;
+}
+
+/**
+ * Deterministically resolve the single shipping label for a CTN-SO
+ * (order-level) gate scan, when unambiguous. A CTN-SO barcode identifies an
+ * order, not a specific carton, so an order with zero or multiple shipping
+ * labels has no single correct answer — this returns undefined (never a
+ * guess) in that case, matching ols_gate_scans.shipping_label_id's nullable
+ * FK. Only the exactly-one-candidate case is a real, provable link.
+ */
+function resolveUnambiguousShippingLabelId(orderNumber: string, ctx?: GateResolutionContext): string | undefined {
+  if (!ctx) return undefined;
+  const orderCartonIds = new Set(ctx.cartons.filter(c => c.order_ref?.toUpperCase() === orderNumber.toUpperCase()).map(c => c.id));
+  const candidates = ctx.shippingLabels.filter(s => s.carton_id && orderCartonIds.has(s.carton_id));
+  return candidates.length === 1 ? candidates[0].id : undefined;
+}
+
 export interface ScanFlowResult {
   ok: boolean;
   userMessage: string;
@@ -70,6 +90,7 @@ async function recordCentralScanEvent(opts: {
 export async function processDispatchGateCtnSoScan(
   scannedBarcode: string,
   orders: OrderRef[],
+  resolutionCtx?: GateResolutionContext,
 ): Promise<ScanFlowResult> {
   const parsed = parseCartonOrderBarcode(scannedBarcode);
   if (!parsed.valid || !parsed.orderNumber) {
@@ -140,8 +161,13 @@ export async function processDispatchGateCtnSoScan(
     syncStatus: "ready_to_submit",
   });
 
+  // Real FK when unambiguous; never a guess when the order has zero or
+  // multiple shipping labels (see resolveUnambiguousShippingLabelId).
+  const shippingLabelId = resolveUnambiguousShippingLabelId(order.order_number, resolutionCtx);
+
   await insertRow("ols_gate_scans", {
     qr_ref: match.scanned,
+    shipping_label_id: shippingLabelId,
     result: "green",
     reason: "CTN-SO gate verified — ready for Central submit",
   });
