@@ -25,6 +25,18 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Without node_modules present, Super-Linter's TYPESCRIPT_ES step can't
+      # resolve this repo's eslint.config.js (which imports typescript-eslint,
+      # eslint-plugin-react-hooks, etc.), silently falls back to its own
+      # bundled default ruleset (eslint-plugin-n), and then reports every
+      # import in the repo as unresolvable and every browser API (localStorage,
+      # navigator, crypto, Blob, URL) as an unsupported Node builtin.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+
       - name: Super-Linter
         uses: super-linter/super-linter@v8.7.0
         env:
