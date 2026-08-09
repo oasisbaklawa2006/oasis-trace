@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { CentralPayloadPreview } from "@/components/CentralPayloadPreview";
 import { listTable, insertRow, updateRow } from "@/lib/data";
 import { classifyCartonBarcode } from "@/lib/scanContract";
-import { processDispatchGateCtnSoScan, type ScanFlowResult } from "@/lib/scanService";
+import { processDispatchGateCtnSoScan, resolveLegacyGateDecision, type ScanFlowResult, type LegacyGateResult } from "@/lib/scanService";
 import { ShieldCheck, ShieldAlert, ScanLine, Volume2, VolumeX } from "lucide-react";
 import { feedback, isFeedbackEnabled, setFeedbackEnabled } from "@/lib/scanFeedback";
 import { toast } from "sonner";
@@ -19,8 +19,6 @@ import type { CentralScanSyncStatus } from "@/lib/centralScanStatus";
 import type { Carton, FinancePi, GateScanRow, OrderCache, ShippingLabelRow } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
 
-interface LegacyResult { kind: "green" | "red"; title: string; reason?: string; ref?: string; }
-
 export default function GateScan() {
   const [scan, setScan] = useState("");
   const [labels, setLabels] = useState<ShippingLabelRow[]>([]);
@@ -28,7 +26,7 @@ export default function GateScan() {
   const [pis, setPis] = useState<FinancePi[]>([]);
   const [orders, setOrders] = useState<OrderCache[]>([]);
   const [history, setHistory] = useState<GateScanRow[]>([]);
-  const [legacyResult, setLegacyResult] = useState<LegacyResult | null>(null);
+  const [legacyResult, setLegacyResult] = useState<LegacyGateResult | null>(null);
   const [ctnResult, setCtnResult] = useState<ScanFlowResult | null>(null);
   const [submitResult, setSubmitResult] = useState<CentralSubmitResult | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -48,31 +46,18 @@ export default function GateScan() {
   async function checkLegacyShipping(ref: string) {
     try {
       setScanError(null);
-      const lbl = labels.find(l => l.qr_ref === ref || l.shipping_no === ref);
-      let res: LegacyResult;
-      if (!lbl) res = { kind: "red", title: "REJECTED", reason: "Invalid reference / shipping label not found", ref };
-      else {
-        const ctn = cartons.find(c => c.id === lbl.carton_id);
-        const pi = pis.find(p => p.id === lbl.pi_id);
-        if (!ctn) res = { kind: "red", title: "REJECTED", reason: "Carton missing" };
-        else if (ctn.status === "cancelled" || ctn.status === "held") res = { kind: "red", title: "HOLD", reason: `Carton status is ${ctn.status}` };
-        else if (ctn.status === "dispatched") res = { kind: "red", title: "DUPLICATE", reason: "Carton already dispatched" };
-        else if (!pi || pi.status !== "cleared") res = { kind: "red", title: "HOLD", reason: "PI not cleared" };
-        else if (!pi.invoice_ref) res = { kind: "red", title: "HOLD", reason: "Invoice missing" };
-        else if (lbl.status === "dispatched") res = { kind: "red", title: "DUPLICATE", reason: "Shipping label already dispatched" };
-        else {
-          res = { kind: "green", title: "ALLOWED", ref: ctn.carton_no };
-          await updateRow("ols_cartons", ctn.id, { status: "dispatched" });
-          await updateRow("ols_shipping_labels", lbl.id, { status: "dispatched" });
-          await insertRow("ols_inventory_movements", {
-            production_label_id: null, from_location: "shipping", to_location: "dispatched",
-            movement_type: "gate_clear", reference_no: ctn.carton_no,
-          });
-          await insertRow("ols_audit_logs", {
-            action: "gate_dispatched", entity_type: "shipping_label", entity_id: lbl.id,
-            details: { carton_no: ctn.carton_no, shipping_no: lbl.shipping_no, qr_ref: ref },
-          });
-        }
+      const { result: res, label: lbl, carton: ctn } = resolveLegacyGateDecision(ref, { shippingLabels: labels, cartons, pis });
+      if (res.kind === "green" && ctn && lbl) {
+        await updateRow("ols_cartons", ctn.id, { status: "dispatched" });
+        await updateRow("ols_shipping_labels", lbl.id, { status: "dispatched" });
+        await insertRow("ols_inventory_movements", {
+          production_label_id: null, from_location: "shipping", to_location: "dispatched",
+          movement_type: "gate_clear", reference_no: ctn.carton_no,
+        });
+        await insertRow("ols_audit_logs", {
+          action: "gate_dispatched", entity_type: "shipping_label", entity_id: lbl.id,
+          details: { carton_no: ctn.carton_no, shipping_no: lbl.shipping_no, qr_ref: ref },
+        });
       }
       await insertRow("ols_gate_scans", { qr_ref: ref, shipping_label_id: lbl?.id, result: res.kind, reason: res.reason });
       await insertRow("ols_scan_history", {

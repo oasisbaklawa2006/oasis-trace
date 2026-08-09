@@ -12,6 +12,7 @@ import { PrintSheet } from "@/components/PrintSheet";
 import { StatusPill } from "@/components/StatusPill";
 import type { Carton, CartonContent, DplDocument, OrderCache, ProductionLabel } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
+import { rollupBySku } from "@/lib/piRollup";
 
 export default function DPL() {
   const [orders, setOrders] = useState<OrderCache[]>([]);
@@ -79,17 +80,7 @@ export default function DPL() {
   }
 
   function cartonSummary(cartonId: string) {
-    const items = contents.filter(c => c.carton_id === cartonId);
-    const bySku: Record<string, { name: string; qty: number; net: number }> = {};
-    for (const it of items) {
-      const lbl = labels.find(l => l.id === it.production_label_id);
-      const sku = lbl?.metadata?.sku || it.manual_sku || "—";
-      const name = lbl?.metadata?.product_name || "—";
-      bySku[sku] ||= { name, qty: 0, net: 0 };
-      bySku[sku].qty += 1;
-      bySku[sku].net += lbl?.net_weight || 0;
-    }
-    return Object.entries(bySku).map(([sku, v]) => ({ sku, ...v }));
+    return rollupBySku([cartonId], contents, labels);
   }
 
   return (

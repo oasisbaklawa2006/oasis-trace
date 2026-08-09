@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import { StatusPill } from "@/components/StatusPill";
 import type { Carton, CartonContent, DplCarton, FinancePi, FinancePiCarton, ProductionLabel } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
+import { rollupBySku } from "@/lib/piRollup";
 
 export default function FinancePI() {
   const [cartons, setCartons] = useState<Carton[]>([]);
@@ -87,22 +88,9 @@ export default function FinancePI() {
       const linked = piCartons.filter(p => p.pi_id === active.id).map(p => p.carton_id);
       for (const cid of linked) await updateRow("ols_cartons", cid, { status: "invoiced" });
 
-      const linkedCtns = cartons.filter(c => linked.includes(c.id));
-      const bySku: Record<string, { name: string; qty: number; net: number; gross: number }> = {};
-      for (const c of linkedCtns) {
-        const items = contents.filter(x => x.carton_id === c.id);
-        for (const it of items) {
-          const lbl = labels.find(l => l.id === it.production_label_id);
-          const sku = lbl?.metadata?.sku || it.manual_sku || "—";
-          const name = lbl?.metadata?.product_name || "—";
-          bySku[sku] ||= { name, qty: 0, net: 0, gross: 0 };
-          bySku[sku].qty += 1;
-          bySku[sku].net += lbl?.net_weight || 0;
-          bySku[sku].gross += lbl?.gross_weight || 0;
-        }
-      }
-      for (const [sku, v] of Object.entries(bySku)) {
-        await insertRow("ols_finance_pi_lines", { pi_id: active.id, sku, product_name: v.name, quantity: v.qty, net_weight: v.net, gross_weight: v.gross });
+      const rollup = rollupBySku(linked.filter((id): id is string => !!id), contents, labels);
+      for (const v of rollup) {
+        await insertRow("ols_finance_pi_lines", { pi_id: active.id, sku: v.sku, product_name: v.name, quantity: v.qty, net_weight: v.net, gross_weight: v.gross });
       }
       toast.success("PI cleared — shipping labels can now be generated");
       setActive(null); setInvoiceRef("");
@@ -118,19 +106,8 @@ export default function FinancePI() {
 
   const linkedCartons = active ? cartons.filter(c => piCartons.some(pc => pc.pi_id === active.id && pc.carton_id === c.id)) : [];
 
-  // SKU-wise summary for customer-facing
-  const customerSku: Record<string, { name: string; qty: number; net: number }> = {};
-  for (const c of linkedCartons) {
-    const items = contents.filter(x => x.carton_id === c.id);
-    for (const it of items) {
-      const lbl = labels.find(l => l.id === it.production_label_id);
-      const sku = lbl?.metadata?.sku || it.manual_sku || "—";
-      const name = lbl?.metadata?.product_name || "—";
-      customerSku[sku] ||= { name, qty: 0, net: 0 };
-      customerSku[sku].qty += 1;
-      customerSku[sku].net += lbl?.net_weight || 0;
-    }
-  }
+  // SKU-wise summary for customer-facing (same rollup as clearPI's write path)
+  const customerSku = rollupBySku(linkedCartons.map(c => c.id), contents, labels);
 
   return (
     <div>
@@ -219,9 +196,9 @@ export default function FinancePI() {
                     <tr><th className="px-2 py-2">SKU</th><th className="px-2 py-2">Product</th><th className="px-2 py-2 text-right">Qty</th><th className="px-2 py-2 text-right">Net kg</th></tr>
                   </thead>
                   <tbody>
-                    {Object.entries(customerSku).map(([sku, v]) => (
-                      <tr key={sku} className="border-t">
-                        <td className="px-2 py-2 font-mono text-xs">{sku}</td>
+                    {customerSku.map(v => (
+                      <tr key={v.sku} className="border-t">
+                        <td className="px-2 py-2 font-mono text-xs">{v.sku}</td>
                         <td className="px-2 py-2">{v.name}</td>
                         <td className="px-2 py-2 text-right">{v.qty}</td>
                         <td className="px-2 py-2 text-right">{v.net.toFixed(2)}</td>

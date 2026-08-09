@@ -15,6 +15,7 @@ import { useNavigate } from "react-router-dom";
 import type { Department, ProductCache, ProductionBatch, ProductionLabel } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
 import { generateLabelCommand, recordLabelGenerated, NO_PHYSICAL_PRINT_NOTE } from "@/lib/labelPrintLog";
+import { buildProductionLabelPayload } from "@/lib/labelPayloads";
 
 export default function ProductionEntry() {
   const nav = useNavigate();
@@ -90,16 +91,11 @@ export default function ProductionEntry() {
         });
         // Generate the TSPL command (proves GENERATED); best-effort clipboard
         // copy. This is NOT a physical print — see labelPrintLog.ts header.
-        const { copiedToClipboard } = await generateLabelCommand({
-          widthMm: 75, heightMm: 50,
-          title: product?.name || "Production Label",
-          lines: [
-            `SKU ${product?.sku || "—"}  Batch ${form.batch_no}`,
-            `MFG ${form.mfg_date}  Shelf ${form.shelf_life_days}d`,
-            `Net ${form.net_weight || "—"} kg  Gross ${form.gross_weight || form.net_weight || "—"} kg`,
-          ],
-          barcode: labelNo,
-        });
+        const { copiedToClipboard } = await generateLabelCommand(buildProductionLabelPayload({
+          productName: product?.name, sku: product?.sku, batchNo: form.batch_no,
+          mfgDate: form.mfg_date, shelfLifeDays: form.shelf_life_days,
+          netWeight: form.net_weight, grossWeight: form.gross_weight, labelNo,
+        }));
         await recordLabelGenerated({ refType: "production_label", refId: label.id, copiedToClipboard });
         created.push(label);
       }

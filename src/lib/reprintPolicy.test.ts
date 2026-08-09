@@ -16,10 +16,11 @@ const dataState = {
   updateShouldFail: false,
   updateError: "update failed",
   inserted: [] as Array<{ table: string; row: unknown }>,
+  printLogs: [] as Array<Record<string, unknown>>,
 };
 
 vi.mock("@/lib/data", () => ({
-  listTable: vi.fn(async () => []),
+  listTable: vi.fn(async (table: string) => (table === "ols_print_logs" ? dataState.printLogs : [])),
   insertRow: vi.fn(async (table: string, row: unknown) => {
     if (dataState.insertShouldFail) throw new Error(dataState.insertError);
     const full = { id: "row-1", ...(row as object) };
@@ -37,13 +38,43 @@ vi.mock("@/lib/audit", () => ({
   audit: vi.fn(async (payload: unknown) => { auditCalls.push(payload); }),
 }));
 
-import { createPendingRequest, approveRequest, rejectRequest } from "./reprintPolicy";
+import { createPendingRequest, approveRequest, rejectRequest, requiresApproval, getReprintCount } from "./reprintPolicy";
 
 beforeEach(() => {
   dataState.insertShouldFail = false;
   dataState.updateShouldFail = false;
   dataState.inserted = [];
+  dataState.printLogs = [];
   auditCalls.length = 0;
+});
+
+describe("requiresApproval — the 2nd-reprint-onward approval gate", () => {
+  it("does not require approval for the first print (0 prior reprints)", () => {
+    expect(requiresApproval(0)).toBe(false);
+  });
+
+  it("requires approval starting from the 1st prior reprint (i.e. the 2nd reprint overall)", () => {
+    expect(requiresApproval(1)).toBe(true);
+    expect(requiresApproval(2)).toBe(true);
+    expect(requiresApproval(10)).toBe(true);
+  });
+});
+
+describe("getReprintCount", () => {
+  it("counts only prior reprints for the matching ref_type + ref_id, ignoring first-prints and other refs", async () => {
+    dataState.printLogs = [
+      { ref_type: "carton", ref_id: "ctn-1", is_reprint: false }, // original print — not a reprint
+      { ref_type: "carton", ref_id: "ctn-1", is_reprint: true },
+      { ref_type: "carton", ref_id: "ctn-1", is_reprint: true },
+      { ref_type: "carton", ref_id: "ctn-OTHER", is_reprint: true }, // different ref
+      { ref_type: "shipping", ref_id: "ctn-1", is_reprint: true }, // different ref_type, same id
+    ];
+    expect(await getReprintCount("carton", "ctn-1")).toBe(2);
+  });
+
+  it("returns 0 when there are no matching print logs", async () => {
+    expect(await getReprintCount("carton", "nonexistent")).toBe(0);
+  });
 });
 
 describe("createPendingRequest", () => {

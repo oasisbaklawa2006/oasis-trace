@@ -21,6 +21,59 @@ export interface OrderRef {
   order_number: string;
 }
 
+// ---------- Legacy (shipping-QR) gate decision ----------
+// Pure green/red decision logic for the legacy gate flow, extracted from
+// GateScan.tsx so the safety-critical decision chain (what makes a carton
+// ALLOWED vs REJECTED/HOLD/DUPLICATE at the exit gate) can be tested without
+// rendering React or mocking the data layer's side effects.
+
+export interface LegacyGateResult { kind: "green" | "red"; title: string; reason?: string; ref?: string; }
+
+export interface LegacyGateEntities {
+  shippingLabels: Array<{ id: string; qr_ref?: string; shipping_no: string; carton_id?: string; pi_id?: string; status?: string }>;
+  cartons: Array<{ id: string; carton_no: string; status?: string }>;
+  pis: Array<{ id: string; status?: string; invoice_ref?: string }>;
+}
+
+export interface LegacyGateDecision {
+  result: LegacyGateResult;
+  label?: LegacyGateEntities["shippingLabels"][number];
+  carton?: LegacyGateEntities["cartons"][number];
+}
+
+/**
+ * Decide whether a scanned shipping QR / shipping number should be allowed
+ * through the gate. Pure — callers are responsible for persisting the
+ * result (gate_scans, cartons/shipping_labels status updates, audit log).
+ */
+export function resolveLegacyGateDecision(ref: string, entities: LegacyGateEntities): LegacyGateDecision {
+  const lbl = entities.shippingLabels.find(l => l.qr_ref === ref || l.shipping_no === ref);
+  if (!lbl) {
+    return { result: { kind: "red", title: "REJECTED", reason: "Invalid reference / shipping label not found", ref } };
+  }
+
+  const ctn = entities.cartons.find(c => c.id === lbl.carton_id);
+  const pi = entities.pis.find(p => p.id === lbl.pi_id);
+
+  if (!ctn) return { result: { kind: "red", title: "REJECTED", reason: "Carton missing" }, label: lbl };
+  if (ctn.status === "cancelled" || ctn.status === "held") {
+    return { result: { kind: "red", title: "HOLD", reason: `Carton status is ${ctn.status}` }, label: lbl, carton: ctn };
+  }
+  if (ctn.status === "dispatched") {
+    return { result: { kind: "red", title: "DUPLICATE", reason: "Carton already dispatched" }, label: lbl, carton: ctn };
+  }
+  if (!pi || pi.status !== "cleared") {
+    return { result: { kind: "red", title: "HOLD", reason: "PI not cleared" }, label: lbl, carton: ctn };
+  }
+  if (!pi.invoice_ref) {
+    return { result: { kind: "red", title: "HOLD", reason: "Invoice missing" }, label: lbl, carton: ctn };
+  }
+  if (lbl.status === "dispatched") {
+    return { result: { kind: "red", title: "DUPLICATE", reason: "Shipping label already dispatched" }, label: lbl, carton: ctn };
+  }
+  return { result: { kind: "green", title: "ALLOWED", ref: ctn.carton_no }, label: lbl, carton: ctn };
+}
+
 export interface GateResolutionContext {
   cartons: Array<{ id: string; order_ref?: string }>;
   shippingLabels: Array<{ id: string; carton_id?: string }>;

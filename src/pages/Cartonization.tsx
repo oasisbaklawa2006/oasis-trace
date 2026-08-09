@@ -25,6 +25,7 @@ import type { CentralScanSyncStatus } from "@/lib/centralScanStatus";
 import type { Carton, CartonContent, OrderCache, ProductionLabel } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
 import { generateLabelCommand, recordLabelGenerated, NO_PHYSICAL_PRINT_NOTE } from "@/lib/labelPrintLog";
+import { buildCartonLabelPayload } from "@/lib/labelPayloads";
 
 interface CartonContentWithLabel extends CartonContent {
   label?: ProductionLabel;
@@ -162,16 +163,11 @@ export default function Cartonization() {
       });
       // Generate the TSPL command (proves GENERATED); best-effort clipboard
       // copy. This is NOT a physical print — see labelPrintLog.ts header.
-      const { copiedToClipboard } = await generateLabelCommand({
-        widthMm: 100, heightMm: 75,
-        title: carton.customer_name || "Customer",
-        lines: [
-          `Order ${carton.order_ref || "—"}`,
-          `Carton ${carton.carton_index ?? "—"} · Items ${contents.length}`,
-          `Net ${net.toFixed(2)} kg`,
-        ],
-        barcode: barcodeDisplay?.labelBarcode || carton.carton_no,
-      });
+      const { copiedToClipboard } = await generateLabelCommand(buildCartonLabelPayload({
+        customerName: carton.customer_name, orderRef: carton.order_ref,
+        cartonIndex: carton.carton_index, itemCount: contents.length,
+        netWeightKg: net, barcode: barcodeDisplay?.labelBarcode || carton.carton_no,
+      }));
       await recordLabelGenerated({ refType: "carton", refId: carton.id, copiedToClipboard });
       toast.success("Carton packed — label command generated", { description: NO_PHYSICAL_PRINT_NOTE });
       setCarton(null); setContents([]); setIdentityResult(null);

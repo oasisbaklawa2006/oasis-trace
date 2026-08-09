@@ -11,6 +11,7 @@ import { ReprintModal } from "@/components/ReprintModal";
 import type { Carton, FinancePi, ShippingLabelRow } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
 import { generateLabelCommand, recordLabelGenerated, NO_PHYSICAL_PRINT_NOTE } from "@/lib/labelPrintLog";
+import { buildShippingLabelPayload } from "@/lib/labelPayloads";
 
 export default function ShippingLabel() {
   const [cartons, setCartons] = useState<Carton[]>([]);
@@ -53,13 +54,9 @@ export default function ShippingLabel() {
       await updateRow("ols_cartons", carton.id, { status: "shipping_labelled" });
       // Generate the TSPL command (proves GENERATED); best-effort clipboard
       // copy. This is NOT a physical print — see labelPrintLog.ts header.
-      const { copiedToClipboard } = await generateLabelCommand({
-        widthMm: 100, heightMm: 150,
-        title: carton.customer_name || "Customer",
-        lines: [`From Oasis Baklawa LLC`, `Invoice ${pi?.invoice_ref || "—"}`, shippingNo],
-        barcode: shippingNo,
-        qr: qrRef,
-      });
+      const { copiedToClipboard } = await generateLabelCommand(buildShippingLabelPayload({
+        consignee: carton.customer_name, invoiceRef: pi?.invoice_ref, shippingNo, qrRef,
+      }));
       await recordLabelGenerated({ refType: "shipping", refId: lbl.id, copiedToClipboard });
       toast.success(`Shipping label ${lbl.shipping_no} — command generated`, { description: NO_PHYSICAL_PRINT_NOTE });
       reload();
