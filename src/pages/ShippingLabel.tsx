@@ -8,30 +8,32 @@ import { toast } from "sonner";
 import { LabelPreview } from "@/components/LabelPreview";
 import { StatusPill } from "@/components/StatusPill";
 import { ReprintModal } from "@/components/ReprintModal";
+import type { Carton, FinancePi, ShippingLabelRow } from "@/lib/types";
+import { errorMessage } from "@/lib/utils";
 
 export default function ShippingLabel() {
-  const [cartons, setCartons] = useState<any[]>([]);
-  const [pis, setPis] = useState<any[]>([]);
-  const [labels, setLabels] = useState<any[]>([]);
-  const [reprint, setReprint] = useState<any | null>(null);
+  const [cartons, setCartons] = useState<Carton[]>([]);
+  const [pis, setPis] = useState<FinancePi[]>([]);
+  const [labels, setLabels] = useState<ShippingLabelRow[]>([]);
+  const [reprint, setReprint] = useState<ShippingLabelRow | null>(null);
   const [labelError, setLabelError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => { reload(); }, []);
   async function reload() {
-    setCartons(await listTable("ols_cartons"));
-    setPis(await listTable("ols_finance_pi"));
-    setLabels(await listTable("ols_shipping_labels", { order: "created_at" }));
+    setCartons(await listTable<Carton>("ols_cartons"));
+    setPis(await listTable<FinancePi>("ols_finance_pi"));
+    setLabels(await listTable<ShippingLabelRow>("ols_shipping_labels", { order: "created_at" }));
   }
 
   const eligible = cartons.filter(c => c.status === "invoiced");
 
-  async function generate(carton: any) {
+  async function generate(carton: Carton) {
     try {
       setLabelError(null);
       setIsSubmitting(true);
       const pi = pis.find(p => p.order_ref === carton.order_ref && p.status === "cleared");
-      const lbl = await insertRow<any>("ols_shipping_labels", {
+      const lbl = await insertRow<ShippingLabelRow>("ols_shipping_labels", {
         shipping_no: num.shipping(),
         carton_id: carton.id,
         pi_id: pi?.id,
@@ -46,8 +48,8 @@ export default function ShippingLabel() {
       await insertRow("ols_print_logs", { ref_type: "shipping", ref_id: lbl.id, success: true });
       toast.success(`Shipping label ${lbl.shipping_no} generated`);
       reload();
-    } catch (err: any) {
-      const msg = err?.message || "Failed to generate shipping label";
+    } catch (err: unknown) {
+      const msg = errorMessage(err, "Failed to generate shipping label");
       setLabelError(msg);
       toast.error(msg, { duration: Infinity });
     } finally {

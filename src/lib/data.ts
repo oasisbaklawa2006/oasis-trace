@@ -8,6 +8,9 @@
 // handling, online/offline detection.
 import { supabase, supabaseConfigured } from "./supabase";
 import { demo } from "./demoStore";
+import { errorMessage } from "./utils";
+
+type DataError = { message?: string; code?: string };
 
 type ModeListener = (mode: "live" | "demo", lastError?: string) => void;
 const listeners = new Set<ModeListener>();
@@ -54,11 +57,11 @@ function withTimeout<T>(p: PromiseLike<T>, ms = TIMEOUT_MS): Promise<T> {
   });
 }
 async function withRetry<T>(fn: () => Promise<T>, attempts = 2): Promise<T> {
-  let lastErr: any;
+  let lastErr: unknown;
   for (let i = 0; i <= attempts; i++) {
-    try { return await fn(); } catch (e: any) {
+    try { return await fn(); } catch (e: unknown) {
       lastErr = e;
-      const msg = (e?.message || "").toLowerCase();
+      const msg = errorMessage(e, "").toLowerCase();
       const transient = msg.includes("timeout") || msg.includes("network") || msg.includes("fetch");
       if (!transient || i === attempts) break;
       await new Promise(r => setTimeout(r, 250 * (i + 1)));
@@ -68,8 +71,9 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 2): Promise<T> {
 }
 
 /** Returns true if a Supabase error is a unique-constraint violation. */
-export function isDuplicateError(err: any): boolean {
-  return err?.code === "23505" || /duplicate key value/i.test(err?.message || "");
+export function isDuplicateError(err: unknown): boolean {
+  const e = err as DataError | undefined;
+  return e?.code === "23505" || /duplicate key value/i.test(e?.message || "");
 }
 
 /** Probe a known ols_ table to confirm live Supabase access. */
@@ -81,12 +85,12 @@ export async function probeLiveMode(): Promise<boolean> {
     );
     if (error) { setMode("demo", error.message); return false; }
     setMode("live"); return true;
-  } catch (e: any) {
-    setMode("demo", e?.message || "Network error"); return false;
+  } catch (e: unknown) {
+    setMode("demo", errorMessage(e, "Network error")); return false;
   }
 }
 
-export async function listTable<T = any>(table: string, opts?: { order?: string; limit?: number }): Promise<T[]> {
+export async function listTable<T = unknown>(table: string, opts?: { order?: string; limit?: number }): Promise<T[]> {
   if (supabaseConfigured && supabase) {
     try {
       const data = await withRetry(async () => {
@@ -99,12 +103,12 @@ export async function listTable<T = any>(table: string, opts?: { order?: string;
       });
       setMode("live");
       return data;
-    } catch (e: any) { setMode("demo", e?.message); }
+    } catch (e: unknown) { setMode("demo", errorMessage(e)); }
   }
   return demo.list<T>(table);
 }
 
-export async function insertRow<T = any>(table: string, row: Record<string, any>): Promise<T> {
+export async function insertRow<T = unknown>(table: string, row: object): Promise<T> {
   if (supabaseConfigured && supabase) {
     try {
       const data = await withRetry(async () => {
@@ -114,10 +118,11 @@ export async function insertRow<T = any>(table: string, row: Record<string, any>
       });
       setMode("live");
       return data;
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (isDuplicateError(e)) {
         // Surface a clean error so callers can show a friendly toast.
-        const err = new Error("Duplicate entry blocked"); (err as any).code = "23505";
+        const err = new Error("Duplicate entry blocked") as Error & { code: string };
+        err.code = "23505";
         throw err;
       }
       // Live mode is configured but the write failed: hard error instead of
@@ -126,14 +131,14 @@ export async function insertRow<T = any>(table: string, row: Record<string, any>
       // flipping the app-wide badge to "Demo Fallback Mode" would misrepresent
       // a blocked write as a silent fallback, which is exactly what this
       // hard-fail path exists to prevent (see file header comment above).
-      console.error(`[ols] insert ${table} failed in live mode:`, e?.message);
-      throw new Error(`Cannot save to database: ${e?.message || "Unknown error"}. Check Supabase connection.`);
+      console.error(`[ols] insert ${table} failed in live mode:`, errorMessage(e));
+      throw new Error(`Cannot save to database: ${errorMessage(e)}. Check Supabase connection.`);
     }
   }
   return demo.insert(table, row) as T;
 }
 
-export async function updateRow<T = any>(table: string, id: string, patch: Record<string, any>): Promise<T | undefined> {
+export async function updateRow<T = unknown>(table: string, id: string, patch: object): Promise<T | undefined> {
   if (supabaseConfigured && supabase) {
     try {
       const data = await withRetry(async () => {
@@ -143,12 +148,12 @@ export async function updateRow<T = any>(table: string, id: string, patch: Recor
       });
       setMode("live");
       return data;
-    } catch (e: any) {
+    } catch (e: unknown) {
       // Live mode is configured but the write failed: hard error instead of
       // silent fallback. Deliberately do NOT call setMode("demo", ...) here —
       // see the matching comment in insertRow() above.
-      console.error(`[ols] update ${table} failed in live mode:`, e?.message);
-      throw new Error(`Cannot save to database: ${e?.message || "Unknown error"}. Check Supabase connection.`);
+      console.error(`[ols] update ${table} failed in live mode:`, errorMessage(e));
+      throw new Error(`Cannot save to database: ${errorMessage(e)}. Check Supabase connection.`);
     }
   }
   return demo.update(table, id, patch) as T | undefined;

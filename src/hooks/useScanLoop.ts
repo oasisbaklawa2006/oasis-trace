@@ -78,13 +78,18 @@ export function useScanLoop({
 let torchStream: MediaStream | null = null;
 let torchOn = false;
 
+// The `torch` capability/constraint is part of the MediaTrack Image Capture
+// spec, which TS's standard DOM lib does not model.
+interface TorchCapabilities extends MediaTrackCapabilities { torch?: boolean; }
+interface TorchConstraintSet extends MediaTrackConstraintSet { torch?: boolean; }
+
 export async function isTorchSupported(): Promise<boolean> {
   if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) return false;
   try {
     const s = torchStream || await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } } });
     torchStream = s;
     const track = s.getVideoTracks()[0];
-    const caps = (track as any).getCapabilities?.() || {};
+    const caps = (track.getCapabilities?.() || {}) as TorchCapabilities;
     return !!caps.torch;
   } catch { return false; }
 }
@@ -96,7 +101,7 @@ export async function setTorch(on: boolean): Promise<boolean> {
       torchStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } } });
     }
     const track = torchStream.getVideoTracks()[0];
-    await (track as any).applyConstraints({ advanced: [{ torch: on }] });
+    await track.applyConstraints({ advanced: [{ torch: on } as TorchConstraintSet] });
     torchOn = on;
     if (!on) {
       // Free the camera when turning off

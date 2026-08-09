@@ -9,26 +9,28 @@ import { num } from "@/lib/numbering";
 import { ScanBarcode, BadgeCheck } from "lucide-react";
 import { toast } from "sonner";
 import { StatusPill } from "@/components/StatusPill";
+import type { Carton, CartonContent, FinancePi, FinancePiCarton, ProductionLabel } from "@/lib/types";
+import { errorMessage } from "@/lib/utils";
 
 export default function FinancePI() {
-  const [cartons, setCartons] = useState<any[]>([]);
-  const [contents, setContents] = useState<any[]>([]);
-  const [labels, setLabels] = useState<any[]>([]);
-  const [pis, setPis] = useState<any[]>([]);
-  const [piCartons, setPiCartons] = useState<any[]>([]);
+  const [cartons, setCartons] = useState<Carton[]>([]);
+  const [contents, setContents] = useState<CartonContent[]>([]);
+  const [labels, setLabels] = useState<ProductionLabel[]>([]);
+  const [pis, setPis] = useState<FinancePi[]>([]);
+  const [piCartons, setPiCartons] = useState<FinancePiCarton[]>([]);
   const [scan, setScan] = useState("");
-  const [active, setActive] = useState<any | null>(null);
+  const [active, setActive] = useState<FinancePi | null>(null);
   const [invoiceRef, setInvoiceRef] = useState("");
   const [piError, setPiError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => { reload(); }, []);
   async function reload() {
-    setCartons(await listTable("ols_cartons"));
-    setContents(await listTable("ols_carton_contents"));
-    setLabels(await listTable("ols_production_labels"));
-    setPis(await listTable("ols_finance_pi", { order: "created_at" }));
-    setPiCartons(await listTable("ols_finance_pi_cartons"));
+    setCartons(await listTable<Carton>("ols_cartons"));
+    setContents(await listTable<CartonContent>("ols_carton_contents"));
+    setLabels(await listTable<ProductionLabel>("ols_production_labels"));
+    setPis(await listTable<FinancePi>("ols_finance_pi", { order: "created_at" }));
+    setPiCartons(await listTable<FinancePiCarton>("ols_finance_pi_cartons"));
   }
 
   async function scanCarton() {
@@ -40,26 +42,26 @@ export default function FinancePI() {
       if (!c) { toast.error("Carton not found"); return; }
       let pi = active;
       if (!pi) {
-        pi = await insertRow<any>("ols_finance_pi", {
+        pi = await insertRow<FinancePi>("ols_finance_pi", {
           pi_no: num.pi(),
           order_ref: c.order_ref,
           customer_name: c.customer_name,
           status: "pending",
         });
         setActive(pi);
-        setPis(prev => [pi, ...prev]);
+        setPis(prev => [pi as FinancePi, ...prev]);
       }
       const dup = piCartons.find(p => p.pi_id === pi.id && p.carton_id === c.id);
       if (dup) { toast.error("Carton already on this PI"); setScan(""); return; }
-      const link = await insertRow<any>("ols_finance_pi_cartons", { pi_id: pi.id, carton_id: c.id });
+      const link = await insertRow<FinancePiCarton>("ols_finance_pi_cartons", { pi_id: pi.id, carton_id: c.id });
       await updateRow("ols_cartons", c.id, { status: "finance_received" });
       setPiCartons(prev => [...prev, link]);
       setCartons(prev => prev.map(x => x.id === c.id ? { ...x, status: "finance_received" } : x));
       setScan("");
       toast.success(`Carton ${c.carton_no} added to PI ${pi.pi_no}`);
       await reload();
-    } catch (err: any) {
-      const msg = err?.message || "Failed to add carton to PI";
+    } catch (err: unknown) {
+      const msg = errorMessage(err, "Failed to add carton to PI");
       setPiError(msg);
       toast.error(msg, { duration: Infinity });
     }
@@ -95,8 +97,8 @@ export default function FinancePI() {
       toast.success("PI cleared — shipping labels can now be generated");
       setActive(null); setInvoiceRef("");
       await reload();
-    } catch (err: any) {
-      const msg = err?.message || "Failed to clear PI";
+    } catch (err: unknown) {
+      const msg = errorMessage(err, "Failed to clear PI");
       setPiError(msg);
       toast.error(msg, { duration: Infinity });
     } finally {

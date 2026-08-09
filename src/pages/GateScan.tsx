@@ -16,16 +16,18 @@ import {
   type CentralSubmitResult,
 } from "@/lib/centralSubmit";
 import type { CentralScanSyncStatus } from "@/lib/centralScanStatus";
+import type { Carton, FinancePi, GateScanRow, OrderCache, ShippingLabelRow } from "@/lib/types";
+import { errorMessage } from "@/lib/utils";
 
 interface LegacyResult { kind: "green" | "red"; title: string; reason?: string; ref?: string; }
 
 export default function GateScan() {
   const [scan, setScan] = useState("");
-  const [labels, setLabels] = useState<any[]>([]);
-  const [cartons, setCartons] = useState<any[]>([]);
-  const [pis, setPis] = useState<any[]>([]);
-  const [orders, setOrders] = useState<any[]>([]);
-  const [history, setHistory] = useState<any[]>([]);
+  const [labels, setLabels] = useState<ShippingLabelRow[]>([]);
+  const [cartons, setCartons] = useState<Carton[]>([]);
+  const [pis, setPis] = useState<FinancePi[]>([]);
+  const [orders, setOrders] = useState<OrderCache[]>([]);
+  const [history, setHistory] = useState<GateScanRow[]>([]);
   const [legacyResult, setLegacyResult] = useState<LegacyResult | null>(null);
   const [ctnResult, setCtnResult] = useState<ScanFlowResult | null>(null);
   const [submitResult, setSubmitResult] = useState<CentralSubmitResult | null>(null);
@@ -36,11 +38,11 @@ export default function GateScan() {
 
   useEffect(() => { reload(); inputRef.current?.focus(); }, []);
   async function reload() {
-    setLabels(await listTable("ols_shipping_labels"));
-    setCartons(await listTable("ols_cartons"));
-    setPis(await listTable("ols_finance_pi"));
-    setOrders(await listTable("ols_orders_cache"));
-    setHistory(await listTable("ols_gate_scans", { order: "scanned_at", limit: 10 }));
+    setLabels(await listTable<ShippingLabelRow>("ols_shipping_labels"));
+    setCartons(await listTable<Carton>("ols_cartons"));
+    setPis(await listTable<FinancePi>("ols_finance_pi"));
+    setOrders(await listTable<OrderCache>("ols_orders_cache"));
+    setHistory(await listTable<GateScanRow>("ols_gate_scans", { order: "scanned_at", limit: 10 }));
   }
 
   async function checkLegacyShipping(ref: string) {
@@ -86,8 +88,8 @@ export default function GateScan() {
       feedback(res.kind === "green" ? "ok" : (res.title === "DUPLICATE" ? "dup" : "error"));
       setLegacyResult(res);
       setCtnResult(null);
-    } catch (err: any) {
-      const msg = err?.message || "Failed to record scan";
+    } catch (err: unknown) {
+      const msg = errorMessage(err, "Failed to record scan");
       setScanError(msg);
       toast.error(msg, { duration: Infinity });
       feedback("error");
@@ -141,8 +143,8 @@ export default function GateScan() {
       setScan("");
       reload();
       inputRef.current?.focus();
-    } catch (err: any) {
-      const msg = err?.message || "Scan failed";
+    } catch (err: unknown) {
+      const msg = errorMessage(err, "Scan failed");
       setScanError(msg);
       toast.error(msg, { duration: Infinity });
     }

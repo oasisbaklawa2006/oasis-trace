@@ -7,6 +7,7 @@ import type { Session } from "@supabase/supabase-js";
 import type { CentralScanSyncStatus } from "@/lib/centralScanStatus";
 import { listTable, updateRow } from "@/lib/data";
 import { getScanUserMessage } from "@/lib/scanContract";
+import { errorMessage } from "@/lib/utils";
 
 export function isCentralSubmitEnabled(): boolean {
   return import.meta.env.VITE_CENTRAL_SCAN_SUBMIT_ENABLED === "true";
@@ -76,9 +77,9 @@ async function patchScanHistoryMetadata(
     await updateRow("ols_scan_history", scanHistoryId, {
       metadata: { ...(row.metadata || {}), ...patch },
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     // Log metadata patch failures but don't crash submit flows — the scan may still have been recorded in Central.
-    console.warn(`[ols] Failed to patch scan history metadata for ${scanHistoryId}:`, err?.message);
+    console.warn(`[ols] Failed to patch scan history metadata for ${scanHistoryId}:`, errorMessage(err));
   }
 }
 
@@ -224,11 +225,11 @@ export async function submitCentralScan(req: CentralSubmitRequest): Promise<Cent
 
   try {
     requireSubmitRole(req.session);
-  } catch (e: any) {
+  } catch (e: unknown) {
     return {
       ok: false,
       status: "failed",
-      message: e.message,
+      message: errorMessage(e),
       failureReason: "forbidden",
     };
   }

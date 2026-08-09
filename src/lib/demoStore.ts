@@ -4,7 +4,7 @@
 
 import { num } from "./numbering";
 
-type Row = Record<string, any>;
+type Row = Record<string, unknown>;
 type Table = Row[];
 type DB = Record<string, Table>;
 

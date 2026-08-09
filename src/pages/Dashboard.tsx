@@ -3,35 +3,44 @@ import { PageHeader } from "@/components/PageHeader";
 import { listTable } from "@/lib/data";
 import { Factory, PackageCheck, Receipt, Tag, ShieldAlert, Printer, RotateCcw, Activity, ScanLine, Truck } from "lucide-react";
 import { StatusPill } from "@/components/StatusPill";
+import type { LucideIcon } from "lucide-react";
+import type {
+  Carton, FinancePi, GateScanRow, PrinterRow, PrintLogRow,
+  ProductionLabel, ScanHistoryRow, ShippingLabelRow,
+} from "@/lib/types";
+import type { ReprintRow } from "@/lib/reprintPolicy";
 
-interface CardDef { label: string; value: number | string; hint?: string; tone?: "primary" | "gold" | "muted"; icon: any; }
+interface CardDef { label: string; value: number | string; hint?: string; tone?: "primary" | "gold" | "muted"; icon: LucideIcon; }
 
 export default function Dashboard() {
-  const [labels, setLabels] = useState<any[]>([]);
-  const [cartons, setCartons] = useState<any[]>([]);
-  const [pis, setPis] = useState<any[]>([]);
-  const [shipping, setShipping] = useState<any[]>([]);
-  const [gates, setGates] = useState<any[]>([]);
-  const [printers, setPrinters] = useState<any[]>([]);
-  const [scans, setScans] = useState<any[]>([]);
-  const [printLogs, setPrintLogs] = useState<any[]>([]);
-  const [reprints, setReprints] = useState<any[]>([]);
+  const [labels, setLabels] = useState<ProductionLabel[]>([]);
+  const [cartons, setCartons] = useState<Carton[]>([]);
+  const [pis, setPis] = useState<FinancePi[]>([]);
+  const [shipping, setShipping] = useState<ShippingLabelRow[]>([]);
+  const [gates, setGates] = useState<GateScanRow[]>([]);
+  const [printers, setPrinters] = useState<PrinterRow[]>([]);
+  const [scans, setScans] = useState<ScanHistoryRow[]>([]);
+  const [printLogs, setPrintLogs] = useState<PrintLogRow[]>([]);
+  const [reprints, setReprints] = useState<ReprintRow[]>([]);
 
   async function reload() {
-    setLabels(await listTable("ols_production_labels", { order: "created_at", limit: 200 }));
-    setCartons(await listTable("ols_cartons", { order: "created_at", limit: 200 }));
-    setPis(await listTable("ols_finance_pi", { order: "created_at", limit: 50 }));
-    setShipping(await listTable("ols_shipping_labels", { order: "created_at", limit: 50 }));
-    setGates(await listTable("ols_gate_scans", { order: "scanned_at", limit: 50 }));
-    setPrinters(await listTable("ols_printers"));
-    setScans(await listTable<any>("ols_scan_history", { order: "created_at", limit: 25 }));
-    setPrintLogs(await listTable<any>("ols_print_logs", { order: "created_at", limit: 25 }));
-    setReprints(await listTable("ols_reprint_requests", { order: "created_at", limit: 50 }));
+    setLabels(await listTable<ProductionLabel>("ols_production_labels", { order: "created_at", limit: 200 }));
+    setCartons(await listTable<Carton>("ols_cartons", { order: "created_at", limit: 200 }));
+    setPis(await listTable<FinancePi>("ols_finance_pi", { order: "created_at", limit: 50 }));
+    setShipping(await listTable<ShippingLabelRow>("ols_shipping_labels", { order: "created_at", limit: 50 }));
+    setGates(await listTable<GateScanRow>("ols_gate_scans", { order: "scanned_at", limit: 50 }));
+    setPrinters(await listTable<PrinterRow>("ols_printers"));
+    setScans(await listTable<ScanHistoryRow>("ols_scan_history", { order: "created_at", limit: 25 }));
+    setPrintLogs(await listTable<PrintLogRow>("ols_print_logs", { order: "created_at", limit: 25 }));
+    setReprints(await listTable<ReprintRow>("ols_reprint_requests", { order: "created_at", limit: 50 }));
   }
   useEffect(() => { reload(); const t = setInterval(reload, 30_000); return () => clearInterval(t); }, []);
 
   const today = new Date().toDateString();
-  const todays = (rows: any[], key = "created_at") => rows.filter(r => r[key] && new Date(r[key]).toDateString() === today);
+  type DatedRow = { created_at?: string; packed_at?: string; cleared_at?: string };
+  function todays<T extends DatedRow>(rows: T[], key: keyof DatedRow = "created_at"): T[] {
+    return rows.filter(r => r[key] && new Date(r[key] as string).toDateString() === today);
+  }
   const failedScansToday = todays(scans).filter(s => s.result && s.result !== "green").length;
   const reprintsToday = todays(reprints).length;
   const pendingDispatch = shipping.filter(s => s.status !== "dispatched").length;

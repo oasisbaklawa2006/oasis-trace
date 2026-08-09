@@ -5,13 +5,15 @@ import { EmptyState } from "@/components/EmptyState";
 import { Button } from "@/components/ui/button";
 import { History, Printer } from "lucide-react";
 import { ReprintModal } from "@/components/ReprintModal";
+import type { PrintLogRow } from "@/lib/types";
+import type { ReprintRefType } from "@/lib/reprintPolicy";
 
 export default function PrintLogs() {
-  const [logs, setLogs] = useState<any[]>([]);
-  const [reprint, setReprint] = useState<any | null>(null);
+  const [logs, setLogs] = useState<PrintLogRow[]>([]);
+  const [reprint, setReprint] = useState<PrintLogRow | null>(null);
 
   useEffect(() => { reload(); }, []);
-  async function reload() { setLogs(await listTable("ols_print_logs", { order: "created_at" })); }
+  async function reload() { setLogs(await listTable<PrintLogRow>("ols_print_logs", { order: "created_at" })); }
 
   return (
     <div>
@@ -55,8 +57,8 @@ export default function PrintLogs() {
         <ReprintModal
           open={!!reprint}
           onOpenChange={(o) => !o && setReprint(null)}
-          refType={reprint.ref_type}
-          refId={reprint.ref_id}
+          refType={reprint.ref_type as ReprintRefType}
+          refId={reprint.ref_id || ""}
           refLabel={`${reprint.ref_type} ${reprint.ref_id?.slice(0, 8)}`}
           onConfirmed={() => reload()}
         />

@@ -20,6 +20,7 @@
 
 import { insertRow } from "@/lib/data";
 import { enqueue, registerHandler } from "@/lib/offlineQueue";
+import { errorMessage } from "@/lib/utils";
 
 export type AuditAction =
   | "print" | "reprint" | "reprint_requested" | "reprint_approved" | "reprint_rejected"
@@ -34,7 +35,7 @@ export interface AuditPayload {
   action: AuditAction;
   entity_type: string;
   entity_id: string;
-  details?: any;
+  details?: Record<string, unknown>;
   /** Optional actor identifier (email / user id when known). */
   actor?: string;
 }
@@ -58,8 +59,8 @@ export async function audit(p: AuditPayload): Promise<void> {
       entity_id: p.entity_id,
       details: p.details,
     });
-  } catch (e: any) {
-    console.warn("[audit] live insert failed, queued:", e?.message);
+  } catch (e: unknown) {
+    console.warn("[audit] live insert failed, queued:", errorMessage(e));
     enqueue(QUEUE_KIND, p);
   }
 }

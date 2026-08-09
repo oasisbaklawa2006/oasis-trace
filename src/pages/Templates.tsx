@@ -9,10 +9,11 @@ import { LabelPreview } from "@/components/LabelPreview";
 import { generateTSPL, generateZPL, type Rotation } from "@/lib/printerCommands";
 import { Copy, Printer, RotateCw } from "lucide-react";
 import { toast } from "sonner";
+import type { LabelTemplateRow } from "@/lib/types";
 
 export default function Templates() {
-  const [templates, setTemplates] = useState<any[]>([]);
-  const [active, setActive] = useState<any | null>(null);
+  const [templates, setTemplates] = useState<LabelTemplateRow[]>([]);
+  const [active, setActive] = useState<LabelTemplateRow | null>(null);
   const [sizeId, setSizeId] = useState("75x50");
   const [showQr, setShowQr] = useState(false);
   const [showSku, setShowSku] = useState(true);
@@ -22,7 +23,7 @@ export default function Templates() {
   const [showGrid, setShowGrid] = useState(false);
 
   useEffect(() => { (async () => {
-    const t = await listTable<any>("ols_label_templates");
+    const t = await listTable<LabelTemplateRow>("ols_label_templates");
     setTemplates(t); setActive(t[0] || null);
   })(); }, []);
 

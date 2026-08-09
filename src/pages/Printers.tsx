@@ -11,11 +11,8 @@ import { Printer, Wrench, Save } from "lucide-react";
 import { generateTSPL, generateZPL, testPrintPayload, type PrinterProfile } from "@/lib/printerCommands";
 import { PRINTER_PRESETS, presetByKey } from "@/lib/printerPresets";
 import { toast } from "sonner";
-
-interface PrinterRow {
-  id: string; name: string; model: string; command_lang: "TSPL" | "ZPL" | string;
-  status: string; settings?: any;
-}
+import type { PrinterRow } from "@/lib/types";
+import { errorMessage } from "@/lib/utils";
 
 export default function Printers() {
   const [printers, setPrinters] = useState<PrinterRow[]>([]);
@@ -39,7 +36,7 @@ export default function Printers() {
 }
 
 function PrinterCard({ printer, onEdit }: { printer: PrinterRow; onEdit: () => void }) {
-  const profile: PrinterProfile = printer.settings || {};
+  const profile: PrinterProfile = (printer.settings as PrinterProfile) || {};
   function testPrint() {
     const payload = testPrintPayload(profile);
     const cmd = printer.command_lang === "ZPL" ? generateZPL(payload) : generateTSPL(payload);
@@ -66,8 +63,8 @@ function PrinterCard({ printer, onEdit }: { printer: PrinterRow; onEdit: () => v
         <Stat row="Gap mm" v={String(profile.gapMm ?? 3)} />
         <Stat row="Black-mark mm" v={profile.blackMarkMm ? String(profile.blackMarkMm) : "—"} />
         <Stat row="DPI" v={String(profile.dpi ?? 203)} />
-        <Stat row="Thermal Y mm" v={String((profile as any).thermalOffsetMm ?? 0)} />
-        <Stat row="X offset mm" v={String((profile as any).xOffsetMm ?? 0)} />
+        <Stat row="Thermal Y mm" v={String(profile.thermalOffsetMm ?? 0)} />
+        <Stat row="X offset mm" v={String(profile.xOffsetMm ?? 0)} />
       </div>
       <div className="mt-4 flex gap-2">
         <Button size="sm" variant="outline" className="flex-1" onClick={onEdit}><Wrench size={14} className="mr-1" /> Calibrate</Button>
@@ -86,15 +83,15 @@ function Stat({ row, v }: { row: string; v: string }) {
 }
 
 function CalibrationDrawer({ printer, onClose, onSaved }: { printer: PrinterRow; onClose: () => void; onSaved: () => void }) {
-  const initial: PrinterProfile = printer.settings || {};
+  const initial: PrinterProfile = (printer.settings as PrinterProfile) || {};
   const [presetKey, setPresetKey] = useState<string>("");
   const [darkness, setDarkness] = useState([initial.darkness ?? 8]);
   const [speed, setSpeed] = useState([initial.speed ?? 4]);
   const [gap, setGap] = useState(String(initial.gapMm ?? 3));
   const [bm, setBm] = useState(String(initial.blackMarkMm ?? ""));
   const [dpi, setDpi] = useState(String(initial.dpi ?? 203));
-  const [thermalY, setThermalY] = useState(String((initial as any).thermalOffsetMm ?? 0));
-  const [xOff, setXOff] = useState(String((initial as any).xOffsetMm ?? 0));
+  const [thermalY, setThermalY] = useState(String(initial.thermalOffsetMm ?? 0));
+  const [xOff, setXOff] = useState(String(initial.xOffsetMm ?? 0));
   const [busy, setBusy] = useState(false);
 
   function applyPreset(k: string) {
@@ -121,7 +118,7 @@ function CalibrationDrawer({ printer, onClose, onSaved }: { printer: PrinterRow;
     try {
       await updateRow("ols_printers", printer.id, { settings: profile });
       toast.success("Printer profile saved"); onSaved();
-    } catch (e: any) { toast.error("Save failed", { description: e?.message }); }
+    } catch (e: unknown) { toast.error("Save failed", { description: errorMessage(e) }); }
     finally { setBusy(false); }
   }
 

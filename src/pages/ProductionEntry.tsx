@@ -12,12 +12,14 @@ import { Printer, Save } from "lucide-react";
 import { toast } from "sonner";
 import { StatusPill } from "@/components/StatusPill";
 import { useNavigate } from "react-router-dom";
+import type { Department, ProductCache, ProductionBatch, ProductionLabel } from "@/lib/types";
+import { errorMessage } from "@/lib/utils";
 
 export default function ProductionEntry() {
   const nav = useNavigate();
-  const [departments, setDepartments] = useState<any[]>([]);
-  const [products, setProducts] = useState<any[]>([]);
-  const [recent, setRecent] = useState<any[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [products, setProducts] = useState<ProductCache[]>([]);
+  const [recent, setRecent] = useState<ProductionLabel[]>([]);
   const [form, setForm] = useState({
     department_id: "", product_id: "", batch_no: num.batch(),
     net_weight: "", gross_weight: "", tray_count: "1",
@@ -25,15 +27,15 @@ export default function ProductionEntry() {
     shift: "A", shelf_life_days: "90", qc_status: "pending",
     operator_name: "", remarks: "",
   });
-  const [lastBatch, setLastBatch] = useState<any[]>([]);
+  const [lastBatch, setLastBatch] = useState<ProductionLabel[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
-      setDepartments(await listTable("ols_departments"));
-      setProducts(await listTable("ols_products_cache"));
-      setRecent(await listTable("ols_production_labels", { order: "created_at", limit: 8 }));
+      setDepartments(await listTable<Department>("ols_departments"));
+      setProducts(await listTable<ProductCache>("ols_products_cache"));
+      setRecent(await listTable<ProductionLabel>("ols_production_labels", { order: "created_at", limit: 8 }));
     })();
   }, []);
 
@@ -49,7 +51,7 @@ export default function ProductionEntry() {
     setIsSubmitting(true);
     setSubmitError(null);
     try {
-      const batch = await insertRow<any>("ols_production_batches", {
+      const batch = await insertRow<ProductionBatch>("ols_production_batches", {
         batch_no: form.batch_no,
         product_id: form.product_id,
         department_id: form.department_id,
@@ -60,12 +62,12 @@ export default function ProductionEntry() {
         remarks: form.remarks,
       });
       const trayCount = Math.max(1, Number(form.tray_count));
-      const created: any[] = [];
+      const created: ProductionLabel[] = [];
       for (let i = 0; i < trayCount; i++) {
         const labelNo = num.productionLabel();
         const mfg = new Date(form.mfg_date);
         const best = new Date(mfg); best.setDate(best.getDate() + Number(form.shelf_life_days || 0));
-        const label = await insertRow<any>("ols_production_labels", {
+        const label = await insertRow<ProductionLabel>("ols_production_labels", {
           label_no: labelNo,
           batch_id: batch.id,
           product_id: form.product_id,
@@ -89,13 +91,13 @@ export default function ProductionEntry() {
         created.push(label);
       }
       setLastBatch(created);
-      setRecent(await listTable("ols_production_labels", { order: "created_at", limit: 8 }));
+      setRecent(await listTable<ProductionLabel>("ols_production_labels", { order: "created_at", limit: 8 }));
       toast.success(`Printed ${created.length} production label${created.length > 1 ? "s" : ""}`, {
         description: "Stock inward created automatically.",
       });
       setForm(f => ({ ...f, batch_no: num.batch() }));
-    } catch (err: any) {
-      const msg = err?.message || "Failed to save production labels";
+    } catch (err: unknown) {
+      const msg = errorMessage(err, "Failed to save production labels");
       setSubmitError(msg);
       toast.error(msg, { duration: Infinity });
     } finally {

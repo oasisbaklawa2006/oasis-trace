@@ -13,8 +13,9 @@ import { useOlsSession } from "@/hooks/useOlsSession";
 import { supabaseConfigured } from "@/lib/supabase";
 import {
   canOverride, createPendingRequest, getReprintCount, requiresApproval,
-  type ReprintRefType,
+  type ReprintRefType, type ReprintRow,
 } from "@/lib/reprintPolicy";
+import { errorMessage } from "@/lib/utils";
 
 const REASONS = [
   "Damaged label", "Printer jam", "Wrong printer / template",
@@ -76,7 +77,7 @@ export function ReprintModal({ open, onOpenChange, refType, refId, refLabel, onC
       // record of this reprint's authorization. If it fails to write, the
       // whole reprint must be treated as failed (outer catch below) rather
       // than silently continuing to print_logs/audit and reporting success.
-      const reqRow = await insertRow<any>("ols_reprint_requests", {
+      const reqRow = await insertRow<ReprintRow>("ols_reprint_requests", {
         ref_type: refType, ref_id: refId,
         reason: packForRow(parsed, override && overrideAllowed),
         status: "approved",
@@ -99,8 +100,8 @@ export function ReprintModal({ open, onOpenChange, refType, refId, refLabel, onC
       toast.success(override ? "Supervisor override · reprint logged" : "Reprint logged", { description: refLabel });
       onConfirmed?.({ reason: finalReason, approver, watermark: DUPLICATE_WATERMARK });
       onOpenChange(false);
-    } catch (e: any) {
-      toast.error("Reprint failed", { description: e?.message });
+    } catch (e: unknown) {
+      toast.error("Reprint failed", { description: errorMessage(e) });
     } finally { setBusy(false); }
   }
 

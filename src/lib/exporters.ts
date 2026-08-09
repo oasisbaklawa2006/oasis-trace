@@ -4,16 +4,17 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
 export interface ReportColumn { key: string; header: string; width?: number; }
+export type ReportCellValue = string | number | boolean | Date | null | undefined;
 export interface Report {
   title: string;
   subtitle?: string;
   generatedAt?: string;
   columns: ReportColumn[];
-  rows: Record<string, any>[];
-  meta?: Record<string, any>;
+  rows: Record<string, ReportCellValue>[];
+  meta?: { truncated?: boolean; total?: number; cap?: number; [key: string]: unknown };
 }
 
-function csvEscape(v: any): string {
+function csvEscape(v: ReportCellValue): string {
   if (v == null) return "";
   const s = String(v);
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -64,12 +65,15 @@ export function exportPDF(report: Report, opts?: { filename?: string; watermark?
         doc.setTextColor(220, 200, 180);
         doc.setFontSize(70);
         doc.setFont("helvetica", "bold");
-        doc.text(opts.watermark, w / 2, h / 2, { align: "center", angle: -22 } as any);
+        // jsPDF's TextOptionsLight type omits `angle`, which the runtime supports.
+        doc.text(opts.watermark, w / 2, h / 2, { align: "center", angle: -22 } as Parameters<typeof doc.text>[3]);
         doc.setTextColor(0, 0, 0);
         doc.setFontSize(9);
         doc.setFont("helvetica", "normal");
       }
-      const pageCount = (doc as any).internal.getNumberOfPages?.() || 1;
+      // jsPDF's public .d.ts omits getNumberOfPages() on `internal`, though it exists at runtime.
+      const internal = doc.internal as typeof doc.internal & { getNumberOfPages?: () => number };
+      const pageCount = internal.getNumberOfPages?.() || 1;
       doc.setFontSize(8);
       doc.setTextColor(120, 120, 120);
       doc.text(
@@ -86,7 +90,7 @@ export function exportPDF(report: Report, opts?: { filename?: string; watermark?
 
 export function printA4() { window.print(); }
 
-function fmt(v: any): string {
+function fmt(v: ReportCellValue): string {
   if (v == null) return "";
   if (typeof v === "number") return Number.isInteger(v) ? String(v) : v.toFixed(2);
   if (v instanceof Date) return v.toLocaleString();

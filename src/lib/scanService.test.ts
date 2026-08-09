@@ -10,14 +10,14 @@ const orders = [
   { id: "order-uuid-2", order_number: "SO-2026-0002" },
 ];
 
-const mockState = { scanHistory: [] as any[] };
+const mockState = { scanHistory: [] as Record<string, unknown>[] };
 
 vi.mock("@/lib/data", () => ({
   listTable: vi.fn(async (table: string) => {
     if (table === "ols_scan_history") return [...mockState.scanHistory];
     return [];
   }),
-  insertRow: vi.fn(async (table: string, row: any) => {
+  insertRow: vi.fn(async (table: string, row: Record<string, unknown>) => {
     if (table === "ols_scan_history") {
       const full = { id: crypto.randomUUID(), ...row };
       mockState.scanHistory.push(full);

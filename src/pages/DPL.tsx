@@ -10,25 +10,27 @@ import { toast } from "sonner";
 import { Barcode } from "@/components/Barcode";
 import { PrintSheet } from "@/components/PrintSheet";
 import { StatusPill } from "@/components/StatusPill";
+import type { Carton, CartonContent, DplDocument, OrderCache, ProductionLabel } from "@/lib/types";
+import { errorMessage } from "@/lib/utils";
 
 export default function DPL() {
-  const [orders, setOrders] = useState<any[]>([]);
-  const [cartons, setCartons] = useState<any[]>([]);
-  const [contents, setContents] = useState<any[]>([]);
-  const [labels, setLabels] = useState<any[]>([]);
+  const [orders, setOrders] = useState<OrderCache[]>([]);
+  const [cartons, setCartons] = useState<Carton[]>([]);
+  const [contents, setContents] = useState<CartonContent[]>([]);
+  const [labels, setLabels] = useState<ProductionLabel[]>([]);
   const [orderRef, setOrderRef] = useState("");
-  const [dpls, setDpls] = useState<any[]>([]);
-  const [active, setActive] = useState<any | null>(null);
-  const [activeCartons, setActiveCartons] = useState<any[]>([]);
+  const [dpls, setDpls] = useState<DplDocument[]>([]);
+  const [active, setActive] = useState<DplDocument | null>(null);
+  const [activeCartons, setActiveCartons] = useState<Carton[]>([]);
   const [dplError, setDplError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => { (async () => {
-    setOrders(await listTable("ols_orders_cache"));
-    setCartons(await listTable("ols_cartons"));
-    setContents(await listTable("ols_carton_contents"));
-    setLabels(await listTable("ols_production_labels"));
-    setDpls(await listTable("ols_dpl_documents", { order: "created_at" }));
+    setOrders(await listTable<OrderCache>("ols_orders_cache"));
+    setCartons(await listTable<Carton>("ols_cartons"));
+    setContents(await listTable<CartonContent>("ols_carton_contents"));
+    setLabels(await listTable<ProductionLabel>("ols_production_labels"));
+    setDpls(await listTable<DplDocument>("ols_dpl_documents", { order: "created_at" }));
   })(); }, []);
 
   const cartonsForOrder = cartons.filter(c => c.order_ref === orderRef && c.status === "packed");
@@ -44,7 +46,7 @@ export default function DPL() {
         gross: acc.gross + (c.gross_weight || 0),
         net: acc.net + (c.net_weight || 0),
       }), { gross: 0, net: 0 });
-      const dpl = await insertRow<any>("ols_dpl_documents", {
+      const dpl = await insertRow<DplDocument>("ols_dpl_documents", {
         dpl_no: num.dpl(),
         order_ref: orderRef,
         customer_name: order?.customer_name,
@@ -58,11 +60,11 @@ export default function DPL() {
       for (let i = 0; i < cartonsForOrder.length; i++) {
         await insertRow("ols_dpl_cartons", { dpl_id: dpl.id, carton_id: cartonsForOrder[i].id, position: i + 1 });
       }
-      setDpls(await listTable("ols_dpl_documents", { order: "created_at" }));
+      setDpls(await listTable<DplDocument>("ols_dpl_documents", { order: "created_at" }));
       openDpl(dpl);
       toast.success(`DPL ${dpl.dpl_no} created with ${cartonsForOrder.length} cartons`);
-    } catch (err: any) {
-      const msg = err?.message || "Failed to generate DPL";
+    } catch (err: unknown) {
+      const msg = errorMessage(err, "Failed to generate DPL");
       setDplError(msg);
       toast.error(msg, { duration: Infinity });
     } finally {
@@ -70,7 +72,7 @@ export default function DPL() {
     }
   }
 
-  function openDpl(d: any) {
+  function openDpl(d: DplDocument) {
     setActive(d);
     const linked = cartons.filter(c => c.order_ref === d.order_ref && c.status !== "draft");
     setActiveCartons(linked);

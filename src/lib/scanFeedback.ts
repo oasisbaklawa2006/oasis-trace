@@ -6,11 +6,20 @@ const FEEDBACK_KEY = "ols_scan_feedback";
 const VOLUME_KEY = "ols_scan_volume";
 const MUTED_KEY = "ols_scan_muted";
 
+type WindowWithWebkitAudio = typeof window & {
+  webkitAudioContext?: typeof AudioContext;
+};
+
 let ctx: AudioContext | null = null;
 function audio() {
   if (typeof window === "undefined") return null;
   if (!ctx) {
-    try { ctx = new (window.AudioContext || (window as any).webkitAudioContext)(); }
+    const w = window as WindowWithWebkitAudio;
+    try {
+      const Ctor = w.AudioContext || w.webkitAudioContext;
+      if (!Ctor) return null;
+      ctx = new Ctor();
+    }
     catch { return null; }
   }
   return ctx;

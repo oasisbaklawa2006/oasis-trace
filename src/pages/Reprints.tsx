@@ -17,6 +17,7 @@ import {
 import { useOlsSession } from "@/hooks/useOlsSession";
 import { supabaseConfigured } from "@/lib/supabase";
 import { toast } from "sonner";
+import { errorMessage } from "@/lib/utils";
 
 export default function Reprints() {
   const [rows, setRows] = useState<ReprintRow[]>([]);
@@ -62,7 +63,7 @@ export default function Reprints() {
         </div>
       </div>
 
-      <Tabs value={tab} onValueChange={(v) => setTab(v as any)}>
+      <Tabs value={tab} onValueChange={(v) => setTab(v as ReprintStatus | "all")}>
         <TabsList>
           <TabsTrigger value="pending">Pending · {counts.pending}</TabsTrigger>
           <TabsTrigger value="approved">Approved · {counts.approved}</TabsTrigger>
@@ -145,7 +146,7 @@ function DecisionDialog({ row, action, onClose, onDone }: {
       else await rejectRequest(row, approver.trim(), remarks);
       toast.success(`Request ${action === "approve" ? "approved" : "rejected"}`);
       onDone();
-    } catch (e: any) { toast.error("Failed", { description: e?.message }); }
+    } catch (e: unknown) { toast.error("Failed", { description: errorMessage(e) }); }
     finally { setBusy(false); }
   }
   return (

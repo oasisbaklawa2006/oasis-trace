@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,10 +6,11 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { REPORT_BUILDERS, defaultRange, HARD_ROW_CAP, type ReportKey } from "@/lib/reports";
 import type { Report } from "@/lib/exporters";
-import { downloadCSV, exportPDF, printA4, type Watermark } from "@/lib/exporters";
+import { downloadCSV, exportPDF, printA4, type Watermark, type ReportCellValue } from "@/lib/exporters";
 import { Download, Printer, FileText, BarChart3, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "@/components/EmptyState";
+import { errorMessage } from "@/lib/utils";
 
 const ymd = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -26,14 +27,14 @@ export default function Reports() {
 
   const cfg = REPORT_BUILDERS[key];
 
-  async function generate() {
+  const generate = useCallback(async () => {
     setBusy(true);
     try {
       const range = {
         from: from ? new Date(from) : undefined,
         to: to ? new Date(to) : undefined,
       };
-      const r = await (cfg as any).build(term, range);
+      const r = await cfg.build(term, range);
       setReport(r);
       if (r.meta?.truncated) {
         toast.warning("Dataset too large", { description: `Showing ${r.meta.cap} of ${r.meta.total}. Narrow filters.` });
@@ -42,12 +43,16 @@ export default function Reports() {
       } else {
         toast.success(`${r.rows.length} row(s)`);
       }
-    } catch (e: any) { toast.error("Report failed", { description: e?.message }); }
+    } catch (e: unknown) { toast.error("Report failed", { description: errorMessage(e) }); }
     finally { setBusy(false); }
-  }
+  }, [cfg, term, from, to]);
 
-  // Auto-run when switching report kind, but with the bounded default range.
-  useEffect(() => { generate(); /* eslint-disable-next-line */ }, [key]);
+  // Auto-run only when the report kind changes — from/to/term are applied via
+  // the explicit Generate button, not on every keystroke.
+  useEffect(() => {
+    generate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
 
   return (
     <div>
@@ -84,7 +89,7 @@ export default function Reports() {
             )}
             <div>
               <Label className="mb-1.5 block text-xs">Watermark</Label>
-              <Select value={watermark} onValueChange={(v) => setWatermark(v as any)}>
+              <Select value={watermark} onValueChange={(v) => setWatermark(v as Watermark | "NONE")}>
                 <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="NONE">None</SelectItem>
@@ -158,7 +163,7 @@ export default function Reports() {
   );
 }
 
-function format(v: any): string {
+function format(v: ReportCellValue): string {
   if (v == null) return "—";
   if (typeof v === "number") return Number.isInteger(v) ? String(v) : v.toFixed(2);
   return String(v);
