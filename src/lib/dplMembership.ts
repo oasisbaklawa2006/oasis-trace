@@ -25,35 +25,48 @@ export interface CartonDplCheck {
 }
 
 /**
- * Looks up which DPL (if any) a carton is a genuine FK member of. Fails
- * closed: a carton with no ols_dpl_cartons row is NOT eligible, since Trace
- * has no approved contract permitting a Finance PI (or any downstream
- * document) to accept a carton that was never placed on a DPL.
+ * Looks up which DPL a carton is a genuine FK member of. Fails closed: a
+ * carton with no ols_dpl_cartons row is NOT eligible, since Trace has no
+ * approved contract permitting a Finance PI (or any downstream document) to
+ * accept a carton that was never placed on a DPL. Also fails closed when a
+ * carton has links to more than one distinct DPL — an ambiguous membership
+ * is a blocking integrity error, never a best-effort pick of the first match.
+ * (The DB additionally enforces a carton-belongs-to-one-DPL uniqueness
+ * constraint; this defends against pre-constraint or stale client state.)
  */
 export function checkCartonDplMembership(cartonId: string, dplCartons: DplCartonLink[]): CartonDplCheck {
-  const link = dplCartons.find(dc => dc.carton_id === cartonId);
-  if (!link) {
+  const links = dplCartons.filter(dc => dc.carton_id === cartonId);
+  const distinctDpls = new Set(links.map(l => l.dpl_id));
+  if (distinctDpls.size === 0) {
     return { ok: false, reason: "Carton is not linked to any DPL — add it to a DPL before Finance PI." };
   }
-  return { ok: true, dplId: link.dpl_id };
+  if (distinctDpls.size > 1) {
+    return { ok: false, reason: "Carton is ambiguously linked to multiple DPLs — membership cannot be proven." };
+  }
+  return { ok: true, dplId: links[0].dpl_id };
 }
 
 /**
  * Validates a scanned carton against the DPL an in-progress Finance PI is
- * already committed to (if any), so a PI can never mix cartons from two
- * different DPLs. `activePiDplId` is undefined for a PI created before this
- * enforcement existed (never rewritten) — such legacy PIs are not
- * retroactively restricted, only newly-created ones are.
+ * already committed to, so a PI can never mix cartons from two different
+ * DPLs. `activePi` distinguishes "no PI yet" (null/undefined — a new PI may
+ * be started) from "a PI already exists" — an existing PI with no provable
+ * dpl_id is rejected outright (fail closed), never treated as unrestricted.
  */
 export function validateCartonForPi(
   cartonId: string,
-  activePiDplId: string | null | undefined,
+  activePi: { dpl_id?: string | null } | null | undefined,
   dplCartons: DplCartonLink[],
 ): CartonDplCheck {
   const membership = checkCartonDplMembership(cartonId, dplCartons);
   if (!membership.ok) return membership;
-  if (activePiDplId && membership.dplId !== activePiDplId) {
-    return { ok: false, reason: "Carton belongs to a different DPL than this Finance PI — cannot mix DPLs on one PI." };
+  if (activePi) {
+    if (!activePi.dpl_id) {
+      return { ok: false, reason: "Active Finance PI has no proven DPL — cannot verify carton membership." };
+    }
+    if (membership.dplId !== activePi.dpl_id) {
+      return { ok: false, reason: "Carton belongs to a different DPL than this Finance PI — cannot mix DPLs on one PI." };
+    }
   }
   return membership;
 }

@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { LabelPreview } from "@/components/LabelPreview";
 import { StatusPill } from "@/components/StatusPill";
 import { ReprintModal } from "@/components/ReprintModal";
-import type { Carton, FinancePi, ShippingLabelRow } from "@/lib/types";
+import type { Carton, FinancePi, FinancePiCarton, ShippingLabelRow } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
 import { generateLabelCommand, recordLabelGenerated, NO_PHYSICAL_PRINT_NOTE } from "@/lib/labelPrintLog";
 import { buildShippingLabelPayload } from "@/lib/labelPayloads";
@@ -17,6 +17,7 @@ import { traceMutations } from "@/lib/traceMutations";
 export default function ShippingLabel() {
   const [cartons, setCartons] = useState<Carton[]>([]);
   const [pis, setPis] = useState<FinancePi[]>([]);
+  const [piCartons, setPiCartons] = useState<FinancePiCarton[]>([]);
   const [labels, setLabels] = useState<ShippingLabelRow[]>([]);
   const [reprint, setReprint] = useState<ShippingLabelRow | null>(null);
   const [labelError, setLabelError] = useState<string | null>(null);
@@ -26,6 +27,9 @@ export default function ShippingLabel() {
   async function reload() {
     setCartons(await listTable<Carton>("ols_cartons"));
     setPis(await listTable<FinancePi>("ols_finance_pi"));
+    // Real FK source for carton -> PI membership — never inferred from
+    // order_ref, which multiple PIs/DPLs can share.
+    setPiCartons(await listTable<FinancePiCarton>("ols_finance_pi_cartons"));
     setLabels(await listTable<ShippingLabelRow>("ols_shipping_labels", { order: "created_at" }));
   }
 
@@ -35,10 +39,19 @@ export default function ShippingLabel() {
     try {
       setLabelError(null);
       setIsSubmitting(true);
-      const pi = pis.find(p => p.order_ref === carton.order_ref && p.status === "cleared");
-      if (!pi) {
-        throw new Error("A cleared Finance PI is required before generating a shipping label.");
+      // Resolve the PI via authoritative carton membership (ols_finance_pi_cartons),
+      // never order_ref alone — an order can have multiple PIs/DPLs, and a
+      // guess here would risk generating a label against the wrong invoice.
+      const memberPiIds = new Set(piCartons.filter(pc => pc.carton_id === carton.id).map(pc => pc.pi_id));
+      const matchingClearedPis = pis.filter(p => memberPiIds.has(p.id) && p.status === "cleared");
+      if (matchingClearedPis.length !== 1) {
+        throw new Error(
+          matchingClearedPis.length === 0
+            ? "A cleared Finance PI containing this carton is required before generating a shipping label."
+            : "Carton is ambiguously linked to multiple cleared Finance PIs — cannot determine the correct invoice.",
+        );
       }
+      const pi = matchingClearedPis[0];
       // shipping_no and qr_ref are both randomly generated (numbering.ts)
       // and unique — retry with fresh ids on a confirmed unique-constraint
       // violation, bounded.

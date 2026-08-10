@@ -52,6 +52,26 @@ export default function ProductionEntry() {
       toast.error("Department, product and net weight are required");
       return;
     }
+    const trayCountRaw = Number(form.tray_count);
+    const netWeightRaw = Number(form.net_weight);
+    const grossWeightRaw = form.gross_weight ? Number(form.gross_weight) : netWeightRaw;
+    const shelfLifeRaw = Number(form.shelf_life_days || 0);
+    if (!Number.isInteger(trayCountRaw) || trayCountRaw < 1 || trayCountRaw > 500) {
+      toast.error("Tray / box count must be a whole number between 1 and 500");
+      return;
+    }
+    if (!Number.isFinite(netWeightRaw) || netWeightRaw <= 0) {
+      toast.error("Net weight must be a positive number");
+      return;
+    }
+    if (!Number.isFinite(grossWeightRaw) || grossWeightRaw <= 0) {
+      toast.error("Gross weight must be a positive number");
+      return;
+    }
+    if (!Number.isFinite(shelfLifeRaw) || shelfLifeRaw < 0) {
+      toast.error("Shelf life must be a non-negative number");
+      return;
+    }
     setIsSubmitting(true);
     setSubmitError(null);
     try {
@@ -61,19 +81,19 @@ export default function ProductionEntry() {
         department_id: form.department_id,
         shift: form.shift,
         mfg_date: form.mfg_date,
-        shelf_life_days: Number(form.shelf_life_days),
+        shelf_life_days: shelfLifeRaw,
         qc_status: form.qc_status,
         remarks: form.remarks,
       };
-      const trayCount = Math.max(1, Number(form.tray_count));
-      const bestBefore = computeBestBefore(form.mfg_date, Number(form.shelf_life_days || 0));
+      const trayCount = trayCountRaw;
+      const bestBefore = computeBestBefore(form.mfg_date, shelfLifeRaw);
       const labelInputs = Array.from({ length: trayCount }, (_, i) => ({
           label_no: num.productionLabel(),
           product_id: form.product_id,
           department_id: form.department_id,
           tray_serial: `T-${i + 1}`,
-          net_weight: Number(form.net_weight),
-          gross_weight: Number(form.gross_weight || form.net_weight),
+          net_weight: netWeightRaw,
+          gross_weight: grossWeightRaw,
           mfg_date: form.mfg_date,
           best_before: bestBefore,
           qc_status: form.qc_status,

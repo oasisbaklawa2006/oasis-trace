@@ -21,7 +21,7 @@ function csvEscape(v: ReportCellValue): string {
   // (Excel, Google Sheets, LibreOffice) treats the cell as text, not a
   // formula — prevents CSV injection from any user-entered field that ends
   // up in an exported report.
-  const safe = /^[\t\r ]*[=+\-@]/.test(s) ? `'${s}` : s;
+  const safe = typeof v === "string" && /^[\t\r ]*[=+\-@]/.test(s) ? `'${s}` : s;
   return /[",\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 }
 

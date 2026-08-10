@@ -28,8 +28,13 @@ export default function DPL() {
   const [activeCartons, setActiveCartons] = useState<Carton[]>([]);
   const [dplError, setDplError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [initialLoaded, setInitialLoaded] = useState(false);
 
   useEffect(() => { (async () => {
+    // Sequential loads take a moment; disable DPL creation (initialLoaded)
+    // until every one has landed, so a fast user action can't race a later
+    // setDplCartons/setDpls call here and clobber state that generateDPL
+    // just wrote (e.g. newly-created carton links).
     setOrders(await listTable<OrderCache>("ols_orders_cache"));
     setCartons(await listTable<Carton>("ols_cartons"));
     setContents(await listTable<CartonContent>("ols_carton_contents"));
@@ -37,6 +42,7 @@ export default function DPL() {
     setDpls(await listTable<DplDocument>("ols_dpl_documents", { order: "created_at" }));
     // Real FK source for DPL <-> carton membership — see dplMembership.ts.
     setDplCartons(await listTable<DplCarton>("ols_dpl_cartons"));
+    setInitialLoaded(true);
   })(); }, []);
 
   const cartonsForOrder = cartons.filter(c => c.order_ref === orderRef && c.status === "packed");
@@ -114,7 +120,7 @@ export default function DPL() {
             <SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.order_number}>{o.order_number} — {o.customer_name}</SelectItem>)}</SelectContent>
           </Select>
           <p className="mt-2 text-xs text-muted-foreground">{cartonsForOrder.length} packed carton(s) ready</p>
-          <Button onClick={generateDPL} disabled={isSubmitting} className="mt-3 w-full bg-gradient-primary text-primary-foreground"><FileText size={16} className="mr-1.5" /> Generate DPL</Button>
+          <Button onClick={generateDPL} disabled={isSubmitting || !initialLoaded} className="mt-3 w-full bg-gradient-primary text-primary-foreground"><FileText size={16} className="mr-1.5" /> Generate DPL</Button>
           {dplError && (
             <div className="mt-3 rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
               <strong>DPL error:</strong> {dplError}

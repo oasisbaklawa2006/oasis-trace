@@ -53,7 +53,7 @@ export default function FinancePI() {
       // and once this PI is committed to a DPL (from its first carton) every
       // later carton must belong to that same DPL. Never inferred from
       // order_ref — see dplMembership.ts.
-      const membership = validateCartonForPi(c.id, active?.dpl_id, dplCartons);
+      const membership = validateCartonForPi(c.id, active, dplCartons);
       if (!membership.ok) { toast.error(membership.reason || "Carton rejected"); setScan(""); return; }
 
       const piNo = active?.pi_no ?? num.pi();
