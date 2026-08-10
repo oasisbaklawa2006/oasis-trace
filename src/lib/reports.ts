@@ -9,8 +9,14 @@
 //   - All listTable() calls go through a memoized loader so a single Reports
 //     session does not re-scan the same table for every report kind.
 import { listTable } from "@/lib/data";
-import type { Report } from "@/lib/exporters";
+import type { Report, ReportCellValue } from "@/lib/csvExport";
 import { parseReason } from "@/lib/reprintPolicy";
+import type {
+  Carton, DplDocument, FinancePi, FinancePiCarton, GateScanRow,
+  InventoryMovement, PrintLogRow, ProductionLabel, ShippingLabelRow,
+} from "@/lib/types";
+import type { ReprintRow } from "@/lib/reprintPolicy";
+import type { CartonContent } from "@/lib/types";
 
 export interface DateRange { from?: Date; to?: Date; }
 
@@ -31,7 +37,7 @@ function effective(r?: DateRange): DateRange {
   return defaultRange();
 }
 
-function inRange(d: any, r?: DateRange) {
+function inRange(d: string | undefined | null, r?: DateRange) {
   if (!r || (!r.from && !r.to)) return true;
   if (!d) return false;
   const t = new Date(d).getTime();
@@ -46,7 +52,7 @@ function capRows<T>(rows: T[]): { rows: T[]; truncated: boolean; total: number }
   return { rows: rows.slice(0, HARD_ROW_CAP), truncated: true, total: rows.length };
 }
 
-function withCap(report: Omit<Report, "rows"> & { rows: any[] }): Report {
+function withCap(report: Omit<Report, "rows"> & { rows: Record<string, ReportCellValue>[] }): Report {
   const { rows, truncated, total } = capRows(report.rows);
   const meta = { ...(report.meta || {}), truncated, total, cap: HARD_ROW_CAP };
   const subtitle = truncated
@@ -56,13 +62,13 @@ function withCap(report: Omit<Report, "rows"> & { rows: any[] }): Report {
 }
 
 // ---------- Memoized loader (per-session shared cache) ----------
-const cache: Record<string, { at: number; data: any[] }> = {};
+const cache: Record<string, { at: number; data: unknown[] }> = {};
 const TTL = 30_000;
-async function load<T = any>(table: string): Promise<T[]> {
+async function load<T>(table: string): Promise<T[]> {
   const c = cache[table];
   if (c && Date.now() - c.at < TTL) return c.data as T[];
   const data = await listTable<T>(table);
-  cache[table] = { at: Date.now(), data: data as any[] };
+  cache[table] = { at: Date.now(), data };
   return data;
 }
 /** Force-clear the loader cache (e.g. after a write). */
@@ -75,15 +81,15 @@ export function invalidateReportCache(table?: string) {
 export async function batchTraceability(batchOrLabelOrOrder: string): Promise<Report> {
   const term = batchOrLabelOrOrder.trim().toLowerCase();
   const [labels, cartons, contents, dpls, pis, shipping, gates] = await Promise.all([
-    load<any>("ols_production_labels"), load<any>("ols_cartons"), load<any>("ols_carton_contents"),
-    load<any>("ols_dpl_documents"), load<any>("ols_finance_pi"),
-    load<any>("ols_shipping_labels"), load<any>("ols_gate_scans"),
+    load<ProductionLabel>("ols_production_labels"), load<Carton>("ols_cartons"), load<CartonContent>("ols_carton_contents"),
+    load<DplDocument>("ols_dpl_documents"), load<FinancePi>("ols_finance_pi"),
+    load<ShippingLabelRow>("ols_shipping_labels"), load<GateScanRow>("ols_gate_scans"),
   ]);
   const matchedLabels = labels.filter(l =>
     [l.label_no, l.batch_no, l.metadata?.batch_no, l.metadata?.sku].some(v => String(v || "").toLowerCase() === term)
     || String(l.label_no || "").toLowerCase() === term
   );
-  const rows: any[] = [];
+  const rows: Record<string, ReportCellValue>[] = [];
   for (const l of matchedLabels) {
     // FK-first chain resolution (avoid order_ref unless nothing else matches)
     const link = contents.find(c => c.production_label_id === l.id);
@@ -122,7 +128,7 @@ export async function batchTraceability(batchOrLabelOrOrder: string): Promise<Re
 export async function cartonMovement(range?: DateRange): Promise<Report> {
   const r = effective(range);
   const [moves, labels, cartons] = await Promise.all([
-    load<any>("ols_inventory_movements"), load<any>("ols_production_labels"), load<any>("ols_cartons"),
+    load<InventoryMovement>("ols_inventory_movements"), load<ProductionLabel>("ols_production_labels"), load<Carton>("ols_cartons"),
   ]);
   const rows = moves.filter(m => inRange(m.created_at, r)).map(m => {
     const l = labels.find(x => x.id === m.production_label_id);
@@ -147,8 +153,8 @@ export async function cartonMovement(range?: DateRange): Promise<Report> {
 export async function dispatchVerification(range?: DateRange): Promise<Report> {
   const r = effective(range);
   const [shipping, cartons, pis, gates] = await Promise.all([
-    load<any>("ols_shipping_labels"), load<any>("ols_cartons"),
-    load<any>("ols_finance_pi"), load<any>("ols_gate_scans"),
+    load<ShippingLabelRow>("ols_shipping_labels"), load<Carton>("ols_cartons"),
+    load<FinancePi>("ols_finance_pi"), load<GateScanRow>("ols_gate_scans"),
   ]);
   const rows = shipping.filter(s => inRange(s.created_at, r)).map(s => {
     const c = cartons.find(x => x.id === s.carton_id);
@@ -175,7 +181,7 @@ export async function dispatchVerification(range?: DateRange): Promise<Report> {
 
 export async function gateClearance(range?: DateRange): Promise<Report> {
   const r = effective(range);
-  const [gates, ship] = await Promise.all([load<any>("ols_gate_scans"), load<any>("ols_shipping_labels")]);
+  const [gates, ship] = await Promise.all([load<GateScanRow>("ols_gate_scans"), load<ShippingLabelRow>("ols_shipping_labels")]);
   const rows = gates.filter(g => inRange(g.scanned_at || g.created_at, r)).map(g => {
     const s = ship.find(x => x.id === g.shipping_label_id);
     return {
@@ -197,7 +203,7 @@ export async function gateClearance(range?: DateRange): Promise<Report> {
 
 export async function printReprintAudit(range?: DateRange): Promise<Report> {
   const r = effective(range);
-  const [logs, reqs] = await Promise.all([load<any>("ols_print_logs"), load<any>("ols_reprint_requests")]);
+  const [logs, reqs] = await Promise.all([load<PrintLogRow>("ols_print_logs"), load<ReprintRow>("ols_reprint_requests")]);
   const reqRows = reqs.filter(x => inRange(x.created_at, r)).map(x => {
     const p = parseReason(x.reason);
     return {
@@ -210,7 +216,10 @@ export async function printReprintAudit(range?: DateRange): Promise<Report> {
   const printRows = logs.filter(l => inRange(l.created_at, r) && l.is_reprint).map(l => ({
     when: new Date(l.created_at).toLocaleString(),
     ref_type: l.ref_type, ref_id: l.ref_id?.slice(0, 8),
-    status: l.success ? "printed" : "failed", category: l.reason || "",
+    // "generated", not "printed" — ols_print_logs.success records only that
+    // the log write succeeded / a command was generated, never physical
+    // print success. See src/lib/labelPrintLog.ts.
+    status: l.success ? "generated" : "failed", category: l.reason || "",
     approver: "", remarks: "", override: "", details: "",
   }));
   return withCap({
@@ -228,10 +237,10 @@ export async function printReprintAudit(range?: DateRange): Promise<Report> {
 export async function financeDiscrepancy(range?: DateRange): Promise<Report> {
   const r = effective(range);
   const [pis, piCartons, cartons, dpls] = await Promise.all([
-    load<any>("ols_finance_pi"), load<any>("ols_finance_pi_cartons"),
-    load<any>("ols_cartons"), load<any>("ols_dpl_documents"),
+    load<FinancePi>("ols_finance_pi"), load<FinancePiCarton>("ols_finance_pi_cartons"),
+    load<Carton>("ols_cartons"), load<DplDocument>("ols_dpl_documents"),
   ]);
-  const rows: any[] = [];
+  const rows: Record<string, ReportCellValue>[] = [];
   for (const p of pis.filter(x => inRange(x.created_at, r))) {
     const attachedIds = piCartons.filter(c => c.pi_id === p.id).map(c => c.carton_id);
     const attached = cartons.filter(c => attachedIds.includes(c.id));
@@ -264,7 +273,7 @@ export async function financeDiscrepancy(range?: DateRange): Promise<Report> {
 }
 
 export const REPORT_BUILDERS = {
-  batch: { label: "Batch Traceability", needsTerm: true, build: batchTraceability as any },
+  batch: { label: "Batch Traceability", needsTerm: true, build: (t: string, _r?: DateRange) => batchTraceability(t) },
   carton: { label: "Carton Movement", needsTerm: false, build: (_t: string, r?: DateRange) => cartonMovement(r) },
   dispatch: { label: "Dispatch Verification", needsTerm: false, build: (_t: string, r?: DateRange) => dispatchVerification(r) },
   gate: { label: "Gate Clearance", needsTerm: false, build: (_t: string, r?: DateRange) => gateClearance(r) },

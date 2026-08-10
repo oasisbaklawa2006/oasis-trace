@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CentralPayloadPreview } from "@/components/CentralPayloadPreview";
-import { listTable, insertRow, updateRow } from "@/lib/data";
+import { listTable, insertRow } from "@/lib/data";
 import { num } from "@/lib/numbering";
 import { buildCartonMetadata, resolveCartonBarcodeDisplay } from "@/lib/barcodeCarton";
 import { supportsCentralBarcode } from "@/lib/scanContract";
@@ -22,14 +22,24 @@ import {
   type CentralSubmitResult,
 } from "@/lib/centralSubmit";
 import type { CentralScanSyncStatus } from "@/lib/centralScanStatus";
+import type { Carton, CartonContent, OrderCache, ProductionLabel } from "@/lib/types";
+import { errorMessage } from "@/lib/utils";
+import { generateLabelCommand, NO_PHYSICAL_PRINT_NOTE } from "@/lib/labelPrintLog";
+import { buildCartonLabelPayload } from "@/lib/labelPayloads";
+import { insertWithUniqueRetry } from "@/lib/insertWithRetry";
+import { traceMutations } from "@/lib/traceMutations";
+
+interface CartonContentWithLabel extends CartonContent {
+  label?: ProductionLabel;
+}
 
 export default function Cartonization() {
-  const [orders, setOrders] = useState<any[]>([]);
-  const [labels, setLabels] = useState<any[]>([]);
+  const [orders, setOrders] = useState<OrderCache[]>([]);
+  const [labels, setLabels] = useState<ProductionLabel[]>([]);
   const [packed, setPacked] = useState<Set<string>>(new Set());
   const [orderRef, setOrderRef] = useState("");
-  const [carton, setCarton] = useState<any | null>(null);
-  const [contents, setContents] = useState<any[]>([]);
+  const [carton, setCarton] = useState<Carton | null>(null);
+  const [contents, setContents] = useState<CartonContentWithLabel[]>([]);
   const [scanInput, setScanInput] = useState("");
   const [identityScan, setIdentityScan] = useState("");
   const [identityResult, setIdentityResult] = useState<ScanFlowResult | null>(null);
@@ -37,21 +47,21 @@ export default function Cartonization() {
   const [submitting, setSubmitting] = useState(false);
   const [cartonError, setCartonError] = useState<string | null>(null);
   const { session, canSubmitCentral } = useOlsSession();
-  const [recentCartons, setRecentCartons] = useState<any[]>([]);
+  const [recentCartons, setRecentCartons] = useState<Carton[]>([]);
 
   const barcodeDisplay = carton
-    ? resolveCartonBarcodeDisplay(carton.order_ref, carton.carton_no, carton.metadata)
+    ? resolveCartonBarcodeDisplay(carton.order_ref || "", carton.carton_no, carton.metadata)
     : orderRef
       ? resolveCartonBarcodeDisplay(orderRef, undefined, supportsCentralBarcode(orderRef) ? { central_barcode: undefined } : undefined)
       : null;
 
   useEffect(() => { (async () => {
-    setOrders(await listTable("ols_orders_cache"));
-    const lbls = await listTable<any>("ols_production_labels");
+    setOrders(await listTable<OrderCache>("ols_orders_cache"));
+    const lbls = await listTable<ProductionLabel>("ols_production_labels");
     setLabels(lbls);
-    const cc = await listTable<any>("ols_carton_contents");
-    setPacked(new Set(cc.filter(c => c.production_label_id).map(c => c.production_label_id)));
-    setRecentCartons(await listTable("ols_cartons", { order: "created_at", limit: 6 }));
+    const cc = await listTable<CartonContent>("ols_carton_contents");
+    setPacked(new Set(cc.filter(c => c.production_label_id).map(c => c.production_label_id!)));
+    setRecentCartons(await listTable<Carton>("ols_cartons", { order: "created_at", limit: 6 }));
   })(); }, []);
 
   async function startCarton() {
@@ -59,29 +69,33 @@ export default function Cartonization() {
       setCartonError(null);
       if (!orderRef) { toast.error("Pick an order first"); return; }
       const order = orders.find(o => o.order_number === orderRef);
-      const legacyNo = num.carton();
-      const metadata = buildCartonMetadata(orderRef, legacyNo);
-      const c = await insertRow<any>("ols_cartons", {
-        carton_no: legacyNo,
-        order_ref: orderRef,
-        customer_code: order?.customer_code,
-        customer_name: order?.customer_name,
-        status: "draft",
-        carton_index: (recentCartons.filter(r => r.order_ref === orderRef).length) + 1,
-        metadata,
+      // carton_no is randomly generated (numbering.ts) and can collide under
+      // concurrent multi-terminal use — retry with a fresh id (and matching
+      // metadata) on a confirmed unique-constraint violation, bounded.
+      const c = await insertWithUniqueRetry<Carton>("ols_cartons", () => {
+        const legacyNo = num.carton();
+        return {
+          carton_no: legacyNo,
+          order_ref: orderRef,
+          customer_code: order?.customer_code,
+          customer_name: order?.customer_name,
+          status: "draft",
+          carton_index: (recentCartons.filter(r => r.order_ref === orderRef).length) + 1,
+          metadata: buildCartonMetadata(orderRef, legacyNo),
+        };
       });
       setCarton(c);
       setContents([]);
       setIdentityResult(null);
       setSubmitResult(null);
-      const display = resolveCartonBarcodeDisplay(orderRef, legacyNo, metadata);
+      const display = resolveCartonBarcodeDisplay(orderRef, c.carton_no, c.metadata);
       if (display.centralBarcode) {
         toast.success(`Carton started · Central barcode ${display.centralBarcode}`);
       } else {
-        toast.success(`Carton ${legacyNo} created (legacy/local barcode)`);
+        toast.success(`Carton ${c.carton_no} created (legacy/local barcode)`);
       }
-    } catch (err: any) {
-      const msg = err?.message || "Failed to create carton";
+    } catch (err: unknown) {
+      const msg = errorMessage(err, "Failed to create carton");
       setCartonError(msg);
       toast.error(msg, { duration: Infinity });
     }
@@ -92,7 +106,7 @@ export default function Cartonization() {
       setCartonError(null);
       const code = identityScan.trim();
       if (!code || !carton) return;
-      const flow = await processCartonIdentityScan(code, carton.order_ref, orders);
+      const flow = await processCartonIdentityScan(code, carton.order_ref || "", orders);
       setIdentityResult(flow);
       setSubmitResult(null);
       if (flow.duplicate) {
@@ -106,8 +120,8 @@ export default function Cartonization() {
         toast.error(flow.userMessage);
       }
       setIdentityScan("");
-    } catch (err: any) {
-      const msg = err?.message || "Failed to verify carton identity";
+    } catch (err: unknown) {
+      const msg = errorMessage(err, "Failed to verify carton identity");
       setCartonError(msg);
       toast.error(msg, { duration: Infinity });
     }
@@ -121,7 +135,7 @@ export default function Cartonization() {
       const lbl = labels.find(l => l.label_no === code);
       if (!lbl) { feedback("error"); toast.error("Label not found", { description: "Use manual add if needed." }); return; }
       if (packed.has(lbl.id)) { feedback("dup"); toast.error("Duplicate scan blocked", { description: "Label already in another active carton." }); return; }
-      const row = await insertRow<any>("ols_carton_contents", { carton_id: carton.id, production_label_id: lbl.id });
+      const row = await insertRow<CartonContent>("ols_carton_contents", { carton_id: carton.id, production_label_id: lbl.id });
       await insertRow("ols_inventory_movements", {
         production_label_id: lbl.id, from_location: "store", to_location: "packing",
         movement_type: "carton_pack", reference_no: carton.carton_no,
@@ -130,8 +144,8 @@ export default function Cartonization() {
       setPacked(p => new Set(p).add(lbl.id));
       setScanInput("");
       feedback("ok");
-    } catch (err: any) {
-      const msg = err?.message || "Failed to add label to carton";
+    } catch (err: unknown) {
+      const msg = errorMessage(err, "Failed to add label to carton");
       setCartonError(msg);
       toast.error(msg, { duration: Infinity });
     }
@@ -141,7 +155,7 @@ export default function Cartonization() {
     try {
       setCartonError(null);
       if (!carton || contents.length === 0) { toast.error("Add at least one label"); return; }
-      if (supportsCentralBarcode(carton.order_ref) && !identityResult?.ok) {
+      if (supportsCentralBarcode(carton.order_ref || "") && !identityResult?.ok) {
         toast.error("Verify Central carton identity first", {
           description: "Scan the CTN-SO barcode before packing.",
         });
@@ -149,16 +163,21 @@ export default function Cartonization() {
       }
       const net = contents.reduce((s, c) => s + (c.label?.net_weight || 0), 0);
       const gross = contents.reduce((s, c) => s + (c.label?.gross_weight || 0), 0);
-      await updateRow("ols_cartons", carton.id, {
-        status: "packed", packed_at: new Date().toISOString(),
-        net_weight: net, gross_weight: gross,
-      });
-      await insertRow("ols_print_logs", { ref_type: "carton", ref_id: carton.id, success: true });
-      toast.success("Carton packed & label printed");
+      // Generate the TSPL command (proves GENERATED); best-effort clipboard
+      // copy. This is NOT a physical print — see labelPrintLog.ts header.
+      const { copiedToClipboard } = await generateLabelCommand(buildCartonLabelPayload({
+        customerName: carton.customer_name, orderRef: carton.order_ref,
+        cartonIndex: carton.carton_index, itemCount: contents.length,
+        netWeightKg: net, barcode: barcodeDisplay?.labelBarcode || carton.carton_no,
+      }));
+      await traceMutations.finalizeCarton(
+        carton.id, net, gross, copiedToClipboard, `finalize-carton:${carton.id}`,
+      );
+      toast.success("Carton packed — label command generated", { description: NO_PHYSICAL_PRINT_NOTE });
       setCarton(null); setContents([]); setIdentityResult(null);
-      setRecentCartons(await listTable("ols_cartons", { order: "created_at", limit: 6 }));
-    } catch (err: any) {
-      const msg = err?.message || "Failed to finalize carton";
+      setRecentCartons(await listTable<Carton>("ols_cartons", { order: "created_at", limit: 6 }));
+    } catch (err: unknown) {
+      const msg = errorMessage(err, "Failed to finalize carton");
       setCartonError(msg);
       toast.error(msg, { duration: Infinity });
     }
@@ -183,8 +202,8 @@ export default function Cartonization() {
       if (r.ok) toast.success(r.message);
       else if (r.duplicate) toast.warning(r.message);
       else toast.error(r.message);
-    } catch (err: any) {
-      const msg = err?.message || "Failed to submit carton identity to Central";
+    } catch (err: unknown) {
+      const msg = errorMessage(err, "Failed to submit carton identity to Central");
       setCartonError(msg);
       toast.error(msg, { duration: Infinity });
     } finally {
@@ -206,8 +225,8 @@ export default function Cartonization() {
       setSubmitResult(r);
       if (r.ok) toast.success(r.message);
       else toast.error(r.message);
-    } catch (err: any) {
-      const msg = err?.message || "Failed to retry carton identity submission";
+    } catch (err: unknown) {
+      const msg = errorMessage(err, "Failed to retry carton identity submission");
       setCartonError(msg);
       toast.error(msg, { duration: Infinity });
     } finally {
@@ -237,7 +256,7 @@ export default function Cartonization() {
             {!carton ? (
               <Button onClick={startCarton} className="bg-gradient-primary text-primary-foreground"><PackagePlus size={16} className="mr-1.5" /> Start Carton</Button>
             ) : (
-              <Button variant="outline" onClick={finalizeCarton}><Printer size={16} className="mr-1.5" /> Pack & Print Carton Label</Button>
+              <Button variant="outline" onClick={finalizeCarton}><Printer size={16} className="mr-1.5" /> Pack & Generate Carton Label</Button>
             )}
           </div>
 
@@ -272,6 +291,7 @@ export default function Cartonization() {
                   <div className="flex gap-2">
                     <Input
                       placeholder="Scan CTN-SO order barcode…"
+                      aria-label="Carton identity barcode input"
                       value={identityScan}
                       onChange={e => setIdentityScan(e.target.value)}
                       onKeyDown={e => e.key === "Enter" && verifyCartonIdentity()}
@@ -303,6 +323,7 @@ export default function Cartonization() {
               <div className="mt-4 flex gap-2">
                 <Input
                   placeholder="Scan or type production label number…"
+                  aria-label="Production label barcode input"
                   value={scanInput}
                   onChange={e => setScanInput(e.target.value)}
                   onKeyDown={e => e.key === "Enter" && scanLabel()}
@@ -372,7 +393,7 @@ export default function Cartonization() {
               </thead>
               <tbody>
                 {recentCartons.map(c => {
-                  const d = resolveCartonBarcodeDisplay(c.order_ref, c.carton_no, c.metadata);
+                  const d = resolveCartonBarcodeDisplay(c.order_ref || "", c.carton_no, c.metadata);
                   return (
                     <tr key={c.id} className="border-t">
                       <td className="px-3 py-2 font-mono text-xs">{c.carton_no}</td>

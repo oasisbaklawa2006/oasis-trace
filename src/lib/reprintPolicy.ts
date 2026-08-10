@@ -4,6 +4,7 @@
 // trail without a destructive migration.
 import { listTable, insertRow, updateRow } from "@/lib/data";
 import { audit } from "@/lib/audit";
+import type { PrintLogRow } from "@/lib/types";
 
 export const REASON_DELIM = " ‖ ";
 
@@ -58,7 +59,7 @@ export function parseReason(reason?: string | null): ParsedReason {
 
 /** Count how many times this ref has already been printed (prints + reprints). */
 export async function getReprintCount(refType: ReprintRefType, refId: string): Promise<number> {
-  const logs = await listTable<any>("ols_print_logs");
+  const logs = await listTable<PrintLogRow>("ols_print_logs");
   return logs.filter(l => l.ref_type === refType && l.ref_id === refId && l.is_reprint).length;
 }
 

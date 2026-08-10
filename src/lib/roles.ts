@@ -1,6 +1,7 @@
 /**
  * Role checks for sensitive actions.
- * Production: JWT `app_metadata.ols_roles` or `user_metadata.ols_roles`.
+ * Production: trusted JWT `app_metadata.ols_roles` only. User metadata is
+ * caller-editable and must never grant authority.
  * Demo/offline: optional localStorage fallback only when Supabase auth is off.
  */
 import type { Session } from "@supabase/supabase-js";
@@ -19,9 +20,7 @@ const REPRINT_APPROVE_ROLES: OlsRole[] = ["admin"];
 
 export function getOlsRolesFromSession(session: Session | null | undefined): OlsRole[] {
   if (!session?.user) return [];
-  const raw =
-    session.user.app_metadata?.ols_roles ??
-    session.user.user_metadata?.ols_roles;
+  const raw = session.user.app_metadata?.ols_roles;
   if (Array.isArray(raw)) {
     return raw.filter((r): r is OlsRole => typeof r === "string");
   }

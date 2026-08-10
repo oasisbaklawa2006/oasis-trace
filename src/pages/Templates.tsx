@@ -1,18 +1,21 @@
 import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
-import { listTable } from "@/lib/data";
+import { listTable, insertRow } from "@/lib/data";
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { PRESET_SIZES } from "@/lib/labelSizes";
 import { LabelPreview } from "@/components/LabelPreview";
 import { generateTSPL, generateZPL, type Rotation } from "@/lib/printerCommands";
-import { Copy, Printer, RotateCw } from "lucide-react";
+import { Copy, Printer, RotateCw, Save } from "lucide-react";
 import { toast } from "sonner";
+import type { LabelTemplateRow } from "@/lib/types";
+import { errorMessage } from "@/lib/utils";
 
 export default function Templates() {
-  const [templates, setTemplates] = useState<any[]>([]);
-  const [active, setActive] = useState<any | null>(null);
+  const [templates, setTemplates] = useState<LabelTemplateRow[]>([]);
+  const [active, setActive] = useState<LabelTemplateRow | null>(null);
   const [sizeId, setSizeId] = useState("75x50");
   const [showQr, setShowQr] = useState(false);
   const [showSku, setShowSku] = useState(true);
@@ -20,13 +23,60 @@ export default function Templates() {
   const [scale, setScale] = useState([1]);
   const [rotation, setRotation] = useState<Rotation>(0);
   const [showGrid, setShowGrid] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function reload() {
+    const t = await listTable<LabelTemplateRow>("ols_label_templates");
+    setTemplates(t);
+    return t;
+  }
+
+  function applyTemplate(t: LabelTemplateRow) {
+    setActive(t);
+    setSizeId(`${t.width_mm}x${t.height_mm}`);
+    setShowQr(!!t.show_qr);
+    setScale([t.font_scale ?? 1]);
+    const fields = t.fields as { showSku?: boolean; showWeight?: boolean; showGrid?: boolean; rotation?: Rotation } | undefined;
+    setShowSku(fields?.showSku ?? true);
+    setShowWeight(fields?.showWeight ?? true);
+    setShowGrid(fields?.showGrid ?? false);
+    setRotation(fields?.rotation ?? 0);
+  }
 
   useEffect(() => { (async () => {
-    const t = await listTable<any>("ols_label_templates");
-    setTemplates(t); setActive(t[0] || null);
+    const t = await reload();
+    if (t[0]) applyTemplate(t[0]);
   })(); }, []);
 
   const size = PRESET_SIZES.find(s => s.id === sizeId)!;
+
+  async function saveAsNewTemplate() {
+    const name = newName.trim();
+    if (!name) { toast.error("Template name is required"); return; }
+    setSaving(true);
+    try {
+      const saved = await insertRow<LabelTemplateRow>("ols_label_templates", {
+        name,
+        label_type: active?.label_type || "production",
+        width_mm: size.w,
+        height_mm: size.h,
+        barcode_type: "CODE128",
+        show_qr: showQr,
+        font_scale: scale[0],
+        fields: { showSku, showWeight, showGrid, rotation },
+      });
+      await reload();
+      setActive(saved);
+      setNewName("");
+      toast.success(`Template "${saved.name}" saved`);
+    } catch (e: unknown) {
+      toast.error("Failed to save template", { description: errorMessage(e) });
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const payload = {
     widthMm: size.w, heightMm: size.h,
     title: "Cashew Pyramid Baklawa",
@@ -46,7 +96,7 @@ export default function Templates() {
           <ul className="space-y-1.5">
             {templates.map(t => (
               <li key={t.id}>
-                <button onClick={() => { setActive(t); setSizeId(`${t.width_mm}x${t.height_mm}`); setShowQr(!!t.show_qr); }}
+                <button onClick={() => applyTemplate(t)}
                   className={`w-full rounded-lg border px-3 py-2 text-left text-sm ${active?.id === t.id ? "border-primary bg-primary/5" : "bg-surface"}`}>
                   <div className="flex items-center justify-between">
                     <span className="font-medium">{t.name}</span>
@@ -64,7 +114,7 @@ export default function Templates() {
               <label className="mb-1 block text-xs text-muted-foreground">Preset size</label>
               <div className="flex flex-wrap gap-1.5">
                 {PRESET_SIZES.map(s => (
-                  <button key={s.id} onClick={() => setSizeId(s.id)} className={`rounded-md border px-2 py-1 text-xs ${sizeId === s.id ? "border-primary bg-primary text-primary-foreground" : "bg-surface"}`}>
+                  <button key={s.id} onClick={() => setSizeId(s.id)} aria-pressed={sizeId === s.id} className={`rounded-md border px-2 py-1 text-xs ${sizeId === s.id ? "border-primary bg-primary text-primary-foreground" : "bg-surface"}`}>
                     {s.label}
                   </button>
                 ))}
@@ -82,7 +132,7 @@ export default function Templates() {
               <div className="mb-1 flex justify-between text-xs"><span className="text-muted-foreground">Rotation</span><span className="font-mono">{rotation}°</span></div>
               <div className="flex gap-1">
                 {[0, 90, 180, 270].map(r => (
-                  <button key={r} onClick={() => setRotation(r as Rotation)} className={`flex-1 rounded-md border px-2 py-1 text-xs ${rotation === r ? "border-primary bg-primary text-primary-foreground" : "bg-surface"}`}>
+                  <button key={r} onClick={() => setRotation(r as Rotation)} aria-pressed={rotation === r} className={`flex-1 rounded-md border px-2 py-1 text-xs ${rotation === r ? "border-primary bg-primary text-primary-foreground" : "bg-surface"}`}>
                     <RotateCw size={10} className="inline mr-1" />{r}°
                   </button>
                 ))}
@@ -112,9 +162,17 @@ export default function Templates() {
             <CmdCard title="ZPL" code={generateZPL(payload)} onCopy={copy} />
           </div>
 
-          <div className="mt-4 flex gap-2">
+          <div className="mt-4 flex flex-wrap items-center gap-2">
             <Button onClick={() => window.print()}><Printer size={16} className="mr-1.5" /> Browser Print</Button>
-            <Button variant="outline">Save as new template</Button>
+            <Input
+              value={newName}
+              onChange={e => setNewName(e.target.value)}
+              placeholder="New template name…"
+              className="h-9 w-48"
+            />
+            <Button variant="outline" onClick={saveAsNewTemplate} disabled={saving}>
+              <Save size={16} className="mr-1.5" /> {saving ? "Saving…" : "Save as new template"}
+            </Button>
           </div>
         </div>
       </div>

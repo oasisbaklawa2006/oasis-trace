@@ -4,31 +4,40 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { listTable, insertRow, updateRow } from "@/lib/data";
+import { listTable } from "@/lib/data";
 import { num } from "@/lib/numbering";
-import { ScanBarcode, BadgeCheck } from "lucide-react";
+import { ScanBarcode, BadgeCheck, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { StatusPill } from "@/components/StatusPill";
+import type { Carton, CartonContent, DplCarton, FinancePi, FinancePiCarton, ProductionLabel } from "@/lib/types";
+import { errorMessage } from "@/lib/utils";
+import { rollupBySku } from "@/lib/piRollup";
+import { validateCartonForPi } from "@/lib/dplMembership";
+import { traceMutations } from "@/lib/traceMutations";
 
 export default function FinancePI() {
-  const [cartons, setCartons] = useState<any[]>([]);
-  const [contents, setContents] = useState<any[]>([]);
-  const [labels, setLabels] = useState<any[]>([]);
-  const [pis, setPis] = useState<any[]>([]);
-  const [piCartons, setPiCartons] = useState<any[]>([]);
+  const [cartons, setCartons] = useState<Carton[]>([]);
+  const [contents, setContents] = useState<CartonContent[]>([]);
+  const [labels, setLabels] = useState<ProductionLabel[]>([]);
+  const [pis, setPis] = useState<FinancePi[]>([]);
+  const [piCartons, setPiCartons] = useState<FinancePiCarton[]>([]);
+  const [dplCartons, setDplCartons] = useState<DplCarton[]>([]);
   const [scan, setScan] = useState("");
-  const [active, setActive] = useState<any | null>(null);
+  const [active, setActive] = useState<FinancePi | null>(null);
   const [invoiceRef, setInvoiceRef] = useState("");
   const [piError, setPiError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => { reload(); }, []);
   async function reload() {
-    setCartons(await listTable("ols_cartons"));
-    setContents(await listTable("ols_carton_contents"));
-    setLabels(await listTable("ols_production_labels"));
-    setPis(await listTable("ols_finance_pi", { order: "created_at" }));
-    setPiCartons(await listTable("ols_finance_pi_cartons"));
+    setCartons(await listTable<Carton>("ols_cartons"));
+    setContents(await listTable<CartonContent>("ols_carton_contents"));
+    setLabels(await listTable<ProductionLabel>("ols_production_labels"));
+    setPis(await listTable<FinancePi>("ols_finance_pi", { order: "created_at" }));
+    setPiCartons(await listTable<FinancePiCarton>("ols_finance_pi_cartons"));
+    // Real FK source for PI -> DPL linkage (see scanCarton): a carton's DPL
+    // membership, not the order_ref heuristic.
+    setDplCartons(await listTable<DplCarton>("ols_dpl_cartons"));
   }
 
   async function scanCarton() {
@@ -38,28 +47,31 @@ export default function FinancePI() {
       if (!code) return;
       const c = cartons.find(x => x.carton_no === code);
       if (!c) { toast.error("Carton not found"); return; }
-      let pi = active;
-      if (!pi) {
-        pi = await insertRow<any>("ols_finance_pi", {
-          pi_no: num.pi(),
-          order_ref: c.order_ref,
-          customer_name: c.customer_name,
-          status: "pending",
-        });
-        setActive(pi);
-        setPis(prev => [pi, ...prev]);
-      }
+
+      // ols_dpl_cartons is the authoritative DPL membership — a carton must
+      // genuinely be linked to a DPL to enter a Finance PI (fail closed),
+      // and once this PI is committed to a DPL (from its first carton) every
+      // later carton must belong to that same DPL. Never inferred from
+      // order_ref — see dplMembership.ts.
+      const membership = validateCartonForPi(c.id, active, dplCartons);
+      if (!membership.ok) { toast.error(membership.reason || "Carton rejected"); setScan(""); return; }
+
+      const piNo = active?.pi_no ?? num.pi();
+      const result = await traceMutations.addCartonToPi(
+        c.id, active?.id ?? null, piNo, `pi-carton:${active?.id ?? piNo}:${c.id}`,
+      );
+      const pi = result.pi;
+      if (!active) { setActive(pi); setPis(prev => [pi, ...prev]); }
       const dup = piCartons.find(p => p.pi_id === pi.id && p.carton_id === c.id);
       if (dup) { toast.error("Carton already on this PI"); setScan(""); return; }
-      const link = await insertRow<any>("ols_finance_pi_cartons", { pi_id: pi.id, carton_id: c.id });
-      await updateRow("ols_cartons", c.id, { status: "finance_received" });
+      const link: FinancePiCarton = { id: result.link_id, pi_id: pi.id, carton_id: c.id };
       setPiCartons(prev => [...prev, link]);
       setCartons(prev => prev.map(x => x.id === c.id ? { ...x, status: "finance_received" } : x));
       setScan("");
       toast.success(`Carton ${c.carton_no} added to PI ${pi.pi_no}`);
       await reload();
-    } catch (err: any) {
-      const msg = err?.message || "Failed to add carton to PI";
+    } catch (err: unknown) {
+      const msg = errorMessage(err, "Failed to add carton to PI");
       setPiError(msg);
       toast.error(msg, { duration: Infinity });
     }
@@ -71,32 +83,16 @@ export default function FinancePI() {
       if (!active) return;
       if (!invoiceRef) { toast.error("Enter invoice reference"); return; }
       setIsSubmitting(true);
-      await updateRow("ols_finance_pi", active.id, { status: "cleared", cleared_at: new Date().toISOString(), invoice_ref: invoiceRef });
       const linked = piCartons.filter(p => p.pi_id === active.id).map(p => p.carton_id);
-      for (const cid of linked) await updateRow("ols_cartons", cid, { status: "invoiced" });
-
-      const linkedCtns = cartons.filter(c => linked.includes(c.id));
-      const bySku: Record<string, { name: string; qty: number; net: number; gross: number }> = {};
-      for (const c of linkedCtns) {
-        const items = contents.filter(x => x.carton_id === c.id);
-        for (const it of items) {
-          const lbl = labels.find(l => l.id === it.production_label_id);
-          const sku = lbl?.metadata?.sku || it.manual_sku || "—";
-          const name = lbl?.metadata?.product_name || "—";
-          bySku[sku] ||= { name, qty: 0, net: 0, gross: 0 };
-          bySku[sku].qty += 1;
-          bySku[sku].net += lbl?.net_weight || 0;
-          bySku[sku].gross += lbl?.gross_weight || 0;
-        }
-      }
-      for (const [sku, v] of Object.entries(bySku)) {
-        await insertRow("ols_finance_pi_lines", { pi_id: active.id, sku, product_name: v.name, quantity: v.qty, net_weight: v.net, gross_weight: v.gross });
-      }
+      const rollup = rollupBySku(linked.filter((id): id is string => !!id), contents, labels);
+      await traceMutations.clearPi(active.id, invoiceRef, rollup.map(v => ({
+        sku: v.sku, product_name: v.name, quantity: v.qty, net_weight: v.net, gross_weight: v.gross,
+      })), `clear-pi:${active.id}`);
       toast.success("PI cleared — shipping labels can now be generated");
       setActive(null); setInvoiceRef("");
       await reload();
-    } catch (err: any) {
-      const msg = err?.message || "Failed to clear PI";
+    } catch (err: unknown) {
+      const msg = errorMessage(err, "Failed to clear PI");
       setPiError(msg);
       toast.error(msg, { duration: Infinity });
     } finally {
@@ -106,19 +102,8 @@ export default function FinancePI() {
 
   const linkedCartons = active ? cartons.filter(c => piCartons.some(pc => pc.pi_id === active.id && pc.carton_id === c.id)) : [];
 
-  // SKU-wise summary for customer-facing
-  const customerSku: Record<string, { name: string; qty: number; net: number }> = {};
-  for (const c of linkedCartons) {
-    const items = contents.filter(x => x.carton_id === c.id);
-    for (const it of items) {
-      const lbl = labels.find(l => l.id === it.production_label_id);
-      const sku = lbl?.metadata?.sku || it.manual_sku || "—";
-      const name = lbl?.metadata?.product_name || "—";
-      customerSku[sku] ||= { name, qty: 0, net: 0 };
-      customerSku[sku].qty += 1;
-      customerSku[sku].net += lbl?.net_weight || 0;
-    }
-  }
+  // SKU-wise summary for customer-facing (same rollup as clearPI's write path)
+  const customerSku = rollupBySku(linkedCartons.map(c => c.id), contents, labels);
 
   return (
     <div>
@@ -135,7 +120,7 @@ export default function FinancePI() {
             <Input
               value={scan} onChange={e => setScan(e.target.value)}
               onKeyDown={e => e.key === "Enter" && scanCarton()}
-              placeholder="Scan carton barcode…" className="font-mono" autoFocus
+              placeholder="Scan carton barcode…" aria-label="Carton barcode input" className="font-mono" autoFocus
             />
             <Button onClick={scanCarton} disabled={isSubmitting}><ScanBarcode size={16} /></Button>
           </div>
@@ -207,9 +192,9 @@ export default function FinancePI() {
                     <tr><th className="px-2 py-2">SKU</th><th className="px-2 py-2">Product</th><th className="px-2 py-2 text-right">Qty</th><th className="px-2 py-2 text-right">Net kg</th></tr>
                   </thead>
                   <tbody>
-                    {Object.entries(customerSku).map(([sku, v]) => (
-                      <tr key={sku} className="border-t">
-                        <td className="px-2 py-2 font-mono text-xs">{sku}</td>
+                    {customerSku.map(v => (
+                      <tr key={v.sku} className="border-t">
+                        <td className="px-2 py-2 font-mono text-xs">{v.sku}</td>
                         <td className="px-2 py-2">{v.name}</td>
                         <td className="px-2 py-2 text-right">{v.qty}</td>
                         <td className="px-2 py-2 text-right">{v.net.toFixed(2)}</td>
@@ -217,7 +202,13 @@ export default function FinancePI() {
                     ))}
                   </tbody>
                 </table>
-                <p className="mt-3 text-[11px] text-muted-foreground">Difference engine placeholder — will compare against original order quantities once order data is connected.</p>
+                <p className="mt-3 flex items-start gap-1.5 text-[11px] text-warning-foreground/80">
+                  <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+                  Cannot compare against original order quantities — Trace does not own or read per-SKU
+                  order line items (only order/customer identity is cached here; Sales Order line data is
+                  Central's domain). This comparison would require a genuine backend data contract from
+                  Central, which does not exist yet.
+                </p>
               </TabsContent>
             </Tabs>
           )}

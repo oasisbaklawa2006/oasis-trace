@@ -116,9 +116,6 @@ export default function AppShell() {
             <CircleDot size={10} />
             {mode === "live" ? "Live Supabase Mode" : "Demo Fallback Mode"}
           </div>
-          <div className="inline-flex items-center gap-1.5 rounded-full border border-destructive/50 bg-destructive/15 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-destructive">
-            <CircleDot size={10} /> Test Mode — RLS Off
-          </div>
           {session && (
             <button
               onClick={() => signOut()}

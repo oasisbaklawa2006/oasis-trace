@@ -10,11 +10,12 @@
 // queued, so the audit trail catches up when connectivity returns.
 
 import { isOnline, subscribeOnline } from "@/lib/data";
+import { errorMessage } from "@/lib/utils";
 
 export interface QueuedJob {
   id: string;
   kind: string;
-  payload: any;
+  payload: unknown;
   attempts: number;
   enqueuedAt: number;
   lastError?: string;
@@ -23,7 +24,7 @@ export interface QueuedJob {
 const KEY = "ols_offline_queue";
 const RETRY_MS = 15_000;
 
-type Handler = (payload: any) => Promise<void>;
+type Handler = (payload: unknown) => Promise<void>;
 const handlers = new Map<string, Handler>();
 const listeners = new Set<(n: number) => void>();
 
@@ -44,7 +45,7 @@ export function subscribeQueue(l: (n: number) => void): () => void {
   return () => listeners.delete(l);
 }
 
-export function enqueue(kind: string, payload: any) {
+export function enqueue(kind: string, payload: unknown) {
   const jobs = load();
   jobs.push({
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -62,7 +63,7 @@ export async function flush(): Promise<{ ok: number; failed: number }> {
   flushing = true;
   let ok = 0, failed = 0;
   try {
-    let jobs = load();
+    const jobs = load();
     const remaining: QueuedJob[] = [];
     for (const j of jobs) {
       const h = handlers.get(j.kind);
@@ -70,9 +71,9 @@ export async function flush(): Promise<{ ok: number; failed: number }> {
       try {
         await h(j.payload);
         ok++;
-      } catch (e: any) {
+      } catch (e: unknown) {
         j.attempts++;
-        j.lastError = e?.message || String(e);
+        j.lastError = errorMessage(e);
         // Drop after 10 attempts to avoid infinite growth
         if (j.attempts < 10) remaining.push(j);
         failed++;

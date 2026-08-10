@@ -5,15 +5,16 @@ import { listTable } from "@/lib/data";
 import { StatusPill } from "@/components/StatusPill";
 import { EmptyState } from "@/components/EmptyState";
 import { Boxes } from "lucide-react";
+import type { ProductionLabel, StockUnit } from "@/lib/types";
 
 export default function StockUnits() {
-  const [labels, setLabels] = useState<any[]>([]);
-  const [stock, setStock] = useState<any[]>([]);
+  const [labels, setLabels] = useState<ProductionLabel[]>([]);
+  const [stock, setStock] = useState<StockUnit[]>([]);
   const [q, setQ] = useState("");
 
   useEffect(() => { (async () => {
-    setLabels(await listTable("ols_production_labels"));
-    setStock(await listTable("ols_stock_units"));
+    setLabels(await listTable<ProductionLabel>("ols_production_labels"));
+    setStock(await listTable<StockUnit>("ols_stock_units"));
   })(); }, []);
 
   const term = q.trim().toLowerCase();

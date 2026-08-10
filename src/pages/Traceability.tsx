@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -8,8 +8,14 @@ import { StatusPill } from "@/components/StatusPill";
 import { EmptyState } from "@/components/EmptyState";
 import { cn } from "@/lib/utils";
 import { buildIndex, search, recentSearches, pushRecent, KIND_LABEL, type SearchDoc } from "@/lib/traceSearch";
-import { downloadCSV } from "@/lib/exporters";
+import { downloadCSV } from "@/lib/csvExport";
 import { toast } from "sonner";
+import type { LucideIcon } from "lucide-react";
+import type {
+  Carton, CartonContent, DplDocument, FinancePi, GateScanRow,
+  InventoryMovement, ProductionLabel, ShippingLabelRow,
+} from "@/lib/types";
+import { resolveTraceChain } from "@/lib/traceChain";
 
 export default function Traceability() {
   const [q, setQ] = useState("");
@@ -19,14 +25,14 @@ export default function Traceability() {
   const [quickScan, setQuickScan] = useState(false);
 
   // Chain data (lazy-resolved once docs are loaded)
-  const [labels, setLabels] = useState<any[]>([]);
-  const [cartons, setCartons] = useState<any[]>([]);
-  const [contents, setContents] = useState<any[]>([]);
-  const [pis, setPis] = useState<any[]>([]);
-  const [shipping, setShipping] = useState<any[]>([]);
-  const [movements, setMovements] = useState<any[]>([]);
-  const [dpls, setDpls] = useState<any[]>([]);
-  const [gateScans, setGateScans] = useState<any[]>([]);
+  const [labels, setLabels] = useState<ProductionLabel[]>([]);
+  const [cartons, setCartons] = useState<Carton[]>([]);
+  const [contents, setContents] = useState<CartonContent[]>([]);
+  const [pis, setPis] = useState<FinancePi[]>([]);
+  const [shipping, setShipping] = useState<ShippingLabelRow[]>([]);
+  const [movements, setMovements] = useState<InventoryMovement[]>([]);
+  const [dpls, setDpls] = useState<DplDocument[]>([]);
+  const [gateScans, setGateScans] = useState<GateScanRow[]>([]);
 
   useEffect(() => {
     setRecent(recentSearches());
@@ -34,9 +40,9 @@ export default function Traceability() {
       const idx = await buildIndex();
       setDocs(idx);
       const [l, c, cc, p, s, m, d, g] = await Promise.all([
-        listTable("ols_production_labels"), listTable("ols_cartons"), listTable("ols_carton_contents"),
-        listTable("ols_finance_pi"), listTable("ols_shipping_labels"), listTable("ols_inventory_movements"),
-        listTable("ols_dpl_documents"), listTable("ols_gate_scans"),
+        listTable<ProductionLabel>("ols_production_labels"), listTable<Carton>("ols_cartons"), listTable<CartonContent>("ols_carton_contents"),
+        listTable<FinancePi>("ols_finance_pi"), listTable<ShippingLabelRow>("ols_shipping_labels"), listTable<InventoryMovement>("ols_inventory_movements"),
+        listTable<DplDocument>("ols_dpl_documents"), listTable<GateScanRow>("ols_gate_scans"),
       ]);
       setLabels(l); setCartons(c); setContents(cc); setPis(p); setShipping(s); setMovements(m); setDpls(d); setGateScans(g);
     })();
@@ -49,42 +55,9 @@ export default function Traceability() {
     setChosen(d); pushRecent(d.ref); setRecent(recentSearches());
   }
 
-  // Resolution priority (most reliable first): direct FK > carton_id > dpl_id >
-  // pi_id > order_ref. order_ref is intentionally a last-resort fallback because
-  // it is not enforced by a foreign key and may collide across years.
   const chain = useMemo(() => {
     if (!chosen) return null;
-    let label: any | undefined, carton: any | undefined, ship: any | undefined, pi: any | undefined, dpl: any | undefined;
-    if (chosen.kind === "production_label") label = chosen.raw;
-    else if (chosen.kind === "carton") carton = chosen.raw;
-    else if (chosen.kind === "shipping") ship = chosen.raw;
-    else if (chosen.kind === "pi") pi = chosen.raw;
-    else if (chosen.kind === "dpl") dpl = chosen.raw;
-    else if (chosen.kind === "gate_scan") ship = shipping.find(s => s.id === chosen.raw.shipping_label_id); // FK
-    else if (chosen.kind === "order") carton = cartons.find(c => c.order_ref === chosen.ref);     // fallback
-    else if (chosen.kind === "customer") carton = cartons.find(c => c.customer_name === chosen.ref); // fallback
-    else if (chosen.kind === "sku") label = labels.find(l => l.metadata?.sku === chosen.ref);
-    else if (chosen.kind === "batch") label = labels.find(l => (l.batch_no || l.metadata?.batch_no) === chosen.ref);
-
-    // 1) FK: production_label → carton via ols_carton_contents
-    if (label && !carton) {
-      const link = contents.find(c => c.production_label_id === label.id);
-      if (link) carton = cartons.find(c => c.id === link.carton_id);
-    }
-    // 2) FK: shipping.carton_id
-    if (carton && !ship) ship = shipping.find(s => s.carton_id === carton.id);
-    if (ship && !carton) carton = cartons.find(c => c.id === ship.carton_id);
-    // 3) FK: shipping.pi_id, then pi.dpl_id
-    if (ship && !pi && ship.pi_id) pi = pis.find(p => p.id === ship.pi_id);
-    if (pi && !dpl && pi.dpl_id) dpl = dpls.find(d => d.id === pi.dpl_id);
-    // 4) order_ref fallback only when no FK has resolved
-    if (carton && !pi) pi = pis.find(p => p.order_ref === carton.order_ref);
-    if (carton && !dpl) dpl = dpls.find(d => d.order_ref === carton.order_ref);
-    if (pi && !dpl) dpl = dpls.find(d => d.order_ref === pi.order_ref);
-
-    const labelMovements = label ? movements.filter(m => m.production_label_id === label.id) : [];
-    const gate = ship ? gateScans.find(g => g.shipping_label_id === ship.id) : undefined;
-    return { label, carton, pi, ship, dpl, gate, labelMovements };
+    return resolveTraceChain(chosen, { labels, cartons, contents, pis, shipping, movements, dpls, gateScans });
   }, [chosen, labels, cartons, contents, pis, shipping, movements, dpls, gateScans]);
 
   function copyChain() {
@@ -122,6 +95,7 @@ export default function Traceability() {
               onChange={e => { setQ(e.target.value); setChosen(null); }}
               onKeyDown={e => { if (e.key === "Enter" && results[0]) pick(results[0]); }}
               placeholder="Type a barcode, SKU, batch, order, invoice, customer, QR…"
+              aria-label="Traceability search"
               className={cn("font-mono", quickScan && "h-14 text-lg")}
               autoFocus
             />
@@ -182,7 +156,7 @@ export default function Traceability() {
               <Node icon={Boxes} title="Stock & Movements" resolved={(chain.labelMovements?.length || 0) > 0}>
                 {(chain.labelMovements?.length || 0) === 0 ? <p className="text-xs text-muted-foreground">No movements logged.</p> :
                   <ul className="space-y-1 text-xs">
-                    {chain.labelMovements!.map((m: any) => (
+                    {chain.labelMovements!.map((m) => (
                       <li key={m.id} className="flex items-center gap-2">
                         <span className="font-mono">{m.movement_type}</span>
                         <span className="text-muted-foreground">{m.from_location} → {m.to_location}</span>
@@ -221,7 +195,15 @@ export default function Traceability() {
   );
 }
 
-function Node({ icon: Icon, title, status, ts, resolved, children }: any) {
+interface NodeProps {
+  icon: LucideIcon;
+  title: string;
+  status?: string;
+  ts?: string;
+  resolved: boolean;
+  children?: ReactNode;
+}
+function Node({ icon: Icon, title, status, ts, resolved, children }: NodeProps) {
   return (
     <div className="relative mb-4 pl-8">
       <div className={cn("absolute left-0 top-1 flex h-6 w-6 items-center justify-center rounded-full border-2", resolved ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background text-muted-foreground")}>
@@ -240,7 +222,7 @@ function Node({ icon: Icon, title, status, ts, resolved, children }: any) {
     </div>
   );
 }
-function Grid({ items }: { items: Record<string, any> }) {
+function Grid({ items }: { items: Record<string, string | number | null | undefined> }) {
   return (
     <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs md:grid-cols-4">
       {Object.entries(items).map(([k, v]) => (<div key={k}><span className="text-muted-foreground">{k}</span><p className="font-medium">{v ?? "—"}</p></div>))}

@@ -3,32 +3,46 @@ import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { listTable, insertRow } from "@/lib/data";
+import { listTable } from "@/lib/data";
 import { num } from "@/lib/numbering";
 import { Printer, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { Barcode } from "@/components/Barcode";
 import { PrintSheet } from "@/components/PrintSheet";
 import { StatusPill } from "@/components/StatusPill";
+import type { Carton, CartonContent, DplCarton, DplDocument, OrderCache, ProductionLabel } from "@/lib/types";
+import { errorMessage } from "@/lib/utils";
+import { rollupBySku } from "@/lib/piRollup";
+import { resolveDplMemberCartons } from "@/lib/dplMembership";
+import { traceMutations } from "@/lib/traceMutations";
 
 export default function DPL() {
-  const [orders, setOrders] = useState<any[]>([]);
-  const [cartons, setCartons] = useState<any[]>([]);
-  const [contents, setContents] = useState<any[]>([]);
-  const [labels, setLabels] = useState<any[]>([]);
+  const [orders, setOrders] = useState<OrderCache[]>([]);
+  const [cartons, setCartons] = useState<Carton[]>([]);
+  const [contents, setContents] = useState<CartonContent[]>([]);
+  const [labels, setLabels] = useState<ProductionLabel[]>([]);
   const [orderRef, setOrderRef] = useState("");
-  const [dpls, setDpls] = useState<any[]>([]);
-  const [active, setActive] = useState<any | null>(null);
-  const [activeCartons, setActiveCartons] = useState<any[]>([]);
+  const [dpls, setDpls] = useState<DplDocument[]>([]);
+  const [dplCartons, setDplCartons] = useState<DplCarton[]>([]);
+  const [active, setActive] = useState<DplDocument | null>(null);
+  const [activeCartons, setActiveCartons] = useState<Carton[]>([]);
   const [dplError, setDplError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [initialLoaded, setInitialLoaded] = useState(false);
 
   useEffect(() => { (async () => {
-    setOrders(await listTable("ols_orders_cache"));
-    setCartons(await listTable("ols_cartons"));
-    setContents(await listTable("ols_carton_contents"));
-    setLabels(await listTable("ols_production_labels"));
-    setDpls(await listTable("ols_dpl_documents", { order: "created_at" }));
+    // Sequential loads take a moment; disable DPL creation (initialLoaded)
+    // until every one has landed, so a fast user action can't race a later
+    // setDplCartons/setDpls call here and clobber state that generateDPL
+    // just wrote (e.g. newly-created carton links).
+    setOrders(await listTable<OrderCache>("ols_orders_cache"));
+    setCartons(await listTable<Carton>("ols_cartons"));
+    setContents(await listTable<CartonContent>("ols_carton_contents"));
+    setLabels(await listTable<ProductionLabel>("ols_production_labels"));
+    setDpls(await listTable<DplDocument>("ols_dpl_documents", { order: "created_at" }));
+    // Real FK source for DPL <-> carton membership — see dplMembership.ts.
+    setDplCartons(await listTable<DplCarton>("ols_dpl_cartons"));
+    setInitialLoaded(true);
   })(); }, []);
 
   const cartonsForOrder = cartons.filter(c => c.order_ref === orderRef && c.status === "packed");
@@ -44,8 +58,12 @@ export default function DPL() {
         gross: acc.gross + (c.gross_weight || 0),
         net: acc.net + (c.net_weight || 0),
       }), { gross: 0, net: 0 });
-      const dpl = await insertRow<any>("ols_dpl_documents", {
-        dpl_no: num.dpl(),
+      // dpl_no is randomly generated (numbering.ts) and can collide under
+      // concurrent multi-terminal use — retry with a fresh id on a
+      // confirmed unique-constraint violation, bounded.
+      const dplNo = num.dpl();
+      const result = await traceMutations.createDpl({
+        dpl_no: dplNo,
         order_ref: orderRef,
         customer_name: order?.customer_name,
         destination: order?.destination,
@@ -54,15 +72,18 @@ export default function DPL() {
         total_gross: totals.gross,
         total_net: totals.net,
         status: "open",
-      });
-      for (let i = 0; i < cartonsForOrder.length; i++) {
-        await insertRow("ols_dpl_cartons", { dpl_id: dpl.id, carton_id: cartonsForOrder[i].id, position: i + 1 });
-      }
-      setDpls(await listTable("ols_dpl_documents", { order: "created_at" }));
-      openDpl(dpl);
+      }, cartonsForOrder.map(c => c.id), `create-dpl:${dplNo}`);
+      const { dpl, links: newLinks } = result;
+      setDplCartons(prev => [...prev, ...newLinks]);
+      setDpls(await listTable<DplDocument>("ols_dpl_documents", { order: "created_at" }));
+      // All of cartonsForOrder were just linked to dpl.id above by
+      // construction — use them directly rather than the just-updated
+      // dplCartons state, which the next render hasn't committed yet.
+      setActive(dpl);
+      setActiveCartons(cartonsForOrder);
       toast.success(`DPL ${dpl.dpl_no} created with ${cartonsForOrder.length} cartons`);
-    } catch (err: any) {
-      const msg = err?.message || "Failed to generate DPL";
+    } catch (err: unknown) {
+      const msg = errorMessage(err, "Failed to generate DPL");
       setDplError(msg);
       toast.error(msg, { duration: Infinity });
     } finally {
@@ -70,24 +91,15 @@ export default function DPL() {
     }
   }
 
-  function openDpl(d: any) {
+  function openDpl(d: DplDocument) {
     setActive(d);
-    const linked = cartons.filter(c => c.order_ref === d.order_ref && c.status !== "draft");
-    setActiveCartons(linked);
+    // FK-first: only cartons genuinely linked via ols_dpl_cartons, never
+    // inferred from a shared order_ref (requirement 4).
+    setActiveCartons(resolveDplMemberCartons(d.id, dplCartons, cartons));
   }
 
   function cartonSummary(cartonId: string) {
-    const items = contents.filter(c => c.carton_id === cartonId);
-    const bySku: Record<string, { name: string; qty: number; net: number }> = {};
-    for (const it of items) {
-      const lbl = labels.find(l => l.id === it.production_label_id);
-      const sku = lbl?.metadata?.sku || it.manual_sku || "—";
-      const name = lbl?.metadata?.product_name || "—";
-      bySku[sku] ||= { name, qty: 0, net: 0 };
-      bySku[sku].qty += 1;
-      bySku[sku].net += lbl?.net_weight || 0;
-    }
-    return Object.entries(bySku).map(([sku, v]) => ({ sku, ...v }));
+    return rollupBySku([cartonId], contents, labels);
   }
 
   return (
@@ -108,7 +120,7 @@ export default function DPL() {
             <SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.order_number}>{o.order_number} — {o.customer_name}</SelectItem>)}</SelectContent>
           </Select>
           <p className="mt-2 text-xs text-muted-foreground">{cartonsForOrder.length} packed carton(s) ready</p>
-          <Button onClick={generateDPL} disabled={isSubmitting} className="mt-3 w-full bg-gradient-primary text-primary-foreground"><FileText size={16} className="mr-1.5" /> Generate DPL</Button>
+          <Button onClick={generateDPL} disabled={isSubmitting || !initialLoaded} className="mt-3 w-full bg-gradient-primary text-primary-foreground"><FileText size={16} className="mr-1.5" /> Generate DPL</Button>
           {dplError && (
             <div className="mt-3 rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
               <strong>DPL error:</strong> {dplError}

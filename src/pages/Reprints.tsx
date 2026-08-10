@@ -6,7 +6,7 @@ import { RotateCcw, Check, X, ShieldCheck } from "lucide-react";
 import { StatusPill } from "@/components/StatusPill";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -17,6 +17,7 @@ import {
 import { useOlsSession } from "@/hooks/useOlsSession";
 import { supabaseConfigured } from "@/lib/supabase";
 import { toast } from "sonner";
+import { errorMessage } from "@/lib/utils";
 
 export default function Reprints() {
   const [rows, setRows] = useState<ReprintRow[]>([]);
@@ -62,7 +63,7 @@ export default function Reprints() {
         </div>
       </div>
 
-      <Tabs value={tab} onValueChange={(v) => setTab(v as any)}>
+      <Tabs value={tab} onValueChange={(v) => setTab(v as ReprintStatus | "all")}>
         <TabsList>
           <TabsTrigger value="pending">Pending · {counts.pending}</TabsTrigger>
           <TabsTrigger value="approved">Approved · {counts.approved}</TabsTrigger>
@@ -145,16 +146,29 @@ function DecisionDialog({ row, action, onClose, onDone }: {
       else await rejectRequest(row, approver.trim(), remarks);
       toast.success(`Request ${action === "approve" ? "approved" : "rejected"}`);
       onDone();
-    } catch (e: any) { toast.error("Failed", { description: e?.message }); }
+    } catch (e: unknown) { toast.error("Failed", { description: errorMessage(e) }); }
     finally { setBusy(false); }
   }
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent>
-        <DialogHeader><DialogTitle>{action === "approve" ? "Approve reprint" : "Reject reprint"}</DialogTitle></DialogHeader>
+        <DialogHeader>
+          <DialogTitle>{action === "approve" ? "Approve reprint" : "Reject reprint"}</DialogTitle>
+          <DialogDescription>
+            {action === "approve"
+              ? `Confirm approval for ${row.ref_type} ${row.ref_id?.slice(0, 8)}. This is recorded in the audit log.`
+              : `Confirm rejection for ${row.ref_type} ${row.ref_id?.slice(0, 8)}. This is recorded in the audit log.`}
+          </DialogDescription>
+        </DialogHeader>
         <div className="space-y-3">
-          <div><Label className="mb-1.5 block text-xs">Approver name</Label><Input value={approver} onChange={e => setApprover(e.target.value)} placeholder="Supervisor name" /></div>
-          <div><Label className="mb-1.5 block text-xs">Remarks</Label><Input value={remarks} onChange={e => setRemarks(e.target.value)} placeholder="Optional remarks" /></div>
+          <div>
+            <Label htmlFor="reprint-approver" className="mb-1.5 block text-xs">Approver name</Label>
+            <Input id="reprint-approver" value={approver} onChange={e => setApprover(e.target.value)} placeholder="Supervisor name" />
+          </div>
+          <div>
+            <Label htmlFor="reprint-remarks" className="mb-1.5 block text-xs">Remarks</Label>
+            <Input id="reprint-remarks" value={remarks} onChange={e => setRemarks(e.target.value)} placeholder="Optional remarks" />
+          </div>
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>

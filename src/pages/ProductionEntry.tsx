@@ -5,19 +5,25 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { listTable, insertRow } from "@/lib/data";
+import { listTable } from "@/lib/data";
 import { num } from "@/lib/numbering";
 import { LabelPreview } from "@/components/LabelPreview";
 import { Printer, Save } from "lucide-react";
 import { toast } from "sonner";
 import { StatusPill } from "@/components/StatusPill";
 import { useNavigate } from "react-router-dom";
+import type { Department, ProductCache, ProductionLabel } from "@/lib/types";
+import { errorMessage } from "@/lib/utils";
+import { generateLabelCommandBatch, recordLabelGenerated, NO_PHYSICAL_PRINT_NOTE } from "@/lib/labelPrintLog";
+import { buildProductionLabelPayload } from "@/lib/labelPayloads";
+import { computeBestBefore } from "@/lib/dateMath";
+import { traceMutations } from "@/lib/traceMutations";
 
 export default function ProductionEntry() {
   const nav = useNavigate();
-  const [departments, setDepartments] = useState<any[]>([]);
-  const [products, setProducts] = useState<any[]>([]);
-  const [recent, setRecent] = useState<any[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [products, setProducts] = useState<ProductCache[]>([]);
+  const [recent, setRecent] = useState<ProductionLabel[]>([]);
   const [form, setForm] = useState({
     department_id: "", product_id: "", batch_no: num.batch(),
     net_weight: "", gross_weight: "", tray_count: "1",
@@ -25,15 +31,15 @@ export default function ProductionEntry() {
     shift: "A", shelf_life_days: "90", qc_status: "pending",
     operator_name: "", remarks: "",
   });
-  const [lastBatch, setLastBatch] = useState<any[]>([]);
+  const [lastBatch, setLastBatch] = useState<ProductionLabel[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
-      setDepartments(await listTable("ols_departments"));
-      setProducts(await listTable("ols_products_cache"));
-      setRecent(await listTable("ols_production_labels", { order: "created_at", limit: 8 }));
+      setDepartments(await listTable<Department>("ols_departments"));
+      setProducts(await listTable<ProductCache>("ols_products_cache"));
+      setRecent(await listTable<ProductionLabel>("ols_production_labels", { order: "created_at", limit: 8 }));
     })();
   }, []);
 
@@ -46,56 +52,79 @@ export default function ProductionEntry() {
       toast.error("Department, product and net weight are required");
       return;
     }
+    const trayCountRaw = Number(form.tray_count);
+    const netWeightRaw = Number(form.net_weight);
+    const grossWeightRaw = form.gross_weight ? Number(form.gross_weight) : netWeightRaw;
+    const shelfLifeRaw = Number(form.shelf_life_days || 0);
+    if (!Number.isInteger(trayCountRaw) || trayCountRaw < 1 || trayCountRaw > 500) {
+      toast.error("Tray / box count must be a whole number between 1 and 500");
+      return;
+    }
+    if (!Number.isFinite(netWeightRaw) || netWeightRaw <= 0) {
+      toast.error("Net weight must be a positive number");
+      return;
+    }
+    if (!Number.isFinite(grossWeightRaw) || grossWeightRaw <= 0) {
+      toast.error("Gross weight must be a positive number");
+      return;
+    }
+    if (!Number.isFinite(shelfLifeRaw) || shelfLifeRaw < 0) {
+      toast.error("Shelf life must be a non-negative number");
+      return;
+    }
     setIsSubmitting(true);
     setSubmitError(null);
     try {
-      const batch = await insertRow<any>("ols_production_batches", {
+      const batchInput = {
         batch_no: form.batch_no,
         product_id: form.product_id,
         department_id: form.department_id,
         shift: form.shift,
         mfg_date: form.mfg_date,
-        shelf_life_days: Number(form.shelf_life_days),
+        shelf_life_days: shelfLifeRaw,
         qc_status: form.qc_status,
         remarks: form.remarks,
-      });
-      const trayCount = Math.max(1, Number(form.tray_count));
-      const created: any[] = [];
-      for (let i = 0; i < trayCount; i++) {
-        const labelNo = num.productionLabel();
-        const mfg = new Date(form.mfg_date);
-        const best = new Date(mfg); best.setDate(best.getDate() + Number(form.shelf_life_days || 0));
-        const label = await insertRow<any>("ols_production_labels", {
-          label_no: labelNo,
-          batch_id: batch.id,
+      };
+      const trayCount = trayCountRaw;
+      const bestBefore = computeBestBefore(form.mfg_date, shelfLifeRaw);
+      const labelInputs = Array.from({ length: trayCount }, (_, i) => ({
+          label_no: num.productionLabel(),
           product_id: form.product_id,
           department_id: form.department_id,
           tray_serial: `T-${i + 1}`,
-          net_weight: Number(form.net_weight),
-          gross_weight: Number(form.gross_weight || form.net_weight),
+          net_weight: netWeightRaw,
+          gross_weight: grossWeightRaw,
           mfg_date: form.mfg_date,
-          best_before: best.toISOString().slice(0, 10),
+          best_before: bestBefore,
           qc_status: form.qc_status,
           operator_name: form.operator_name,
           status: "active",
           metadata: { product_name: product?.name, sku: product?.sku, department: departments.find(d => d.id === form.department_id)?.name },
-        });
-        await insertRow("ols_stock_units", { production_label_id: label.id, current_location: "store", current_status: "in_stock" });
-        await insertRow("ols_inventory_movements", {
-          production_label_id: label.id, from_location: "production", to_location: "store",
-          movement_type: "production_inward", reference_no: batch.batch_no,
-        });
-        await insertRow("ols_print_logs", { ref_type: "production_label", ref_id: label.id, success: true });
-        created.push(label);
+      }));
+      const { labels: created } = await traceMutations.createProduction(
+        batchInput, labelInputs, `create-production:${form.batch_no}`,
+      );
+      // Generate every tray's TSPL command (proves GENERATED) and best-effort
+      // copy the WHOLE batch to the clipboard as one block — copying per-tray
+      // would overwrite the clipboard each time, leaving only the last
+      // command retrievable. This is NOT a physical print — see
+      // labelPrintLog.ts header.
+      const { copiedToClipboard } = await generateLabelCommandBatch(created.map(label => buildProductionLabelPayload({
+        productName: product?.name, sku: product?.sku, batchNo: form.batch_no,
+        mfgDate: form.mfg_date, shelfLifeDays: form.shelf_life_days,
+        netWeight: form.net_weight, grossWeight: form.gross_weight, labelNo: label.label_no,
+      })));
+      for (const label of created) {
+        await recordLabelGenerated({ refType: "production_label", refId: label.id, copiedToClipboard });
       }
       setLastBatch(created);
-      setRecent(await listTable("ols_production_labels", { order: "created_at", limit: 8 }));
-      toast.success(`Printed ${created.length} production label${created.length > 1 ? "s" : ""}`, {
-        description: "Stock inward created automatically.",
+      setRecent(await listTable<ProductionLabel>("ols_production_labels", { order: "created_at", limit: 8 }));
+      toast.success(`Generated ${created.length} label command${created.length > 1 ? "s" : ""}`, {
+        description: `${NO_PHYSICAL_PRINT_NOTE} Stock inward created automatically.`,
       });
       setForm(f => ({ ...f, batch_no: num.batch() }));
-    } catch (err: any) {
-      const msg = err?.message || "Failed to save production labels";
+    } catch (err: unknown) {
+      const msg = errorMessage(err, "Failed to save production labels");
       setSubmitError(msg);
       toast.error(msg, { duration: Infinity });
     } finally {
@@ -153,7 +182,7 @@ export default function ProductionEntry() {
             <Field label="Remarks" className="md:col-span-2"><Textarea rows={2} value={form.remarks} onChange={e => update("remarks", e.target.value)} /></Field>
           </div>
           <div className="mt-5 flex flex-wrap gap-2">
-            <Button onClick={generate} disabled={isSubmitting} className="bg-gradient-primary text-primary-foreground shadow-elevated"><Save size={16} className="mr-1.5" /> Generate & Print Labels</Button>
+            <Button onClick={generate} disabled={isSubmitting} className="bg-gradient-primary text-primary-foreground shadow-elevated"><Save size={16} className="mr-1.5" /> Generate Label Commands</Button>
           </div>
           {submitError && (
             <div className="mt-3 rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
@@ -180,16 +209,17 @@ export default function ProductionEntry() {
 
           {lastBatch.length > 0 && (
             <div className="mt-5">
-              <p className="ols-section-title mb-2">Last batch printed</p>
+              <p className="ols-section-title mb-2">Last batch — commands generated</p>
               <ul className="space-y-1.5">
                 {lastBatch.map(l => (
                   <li key={l.id} className="flex items-center justify-between rounded-lg bg-secondary px-3 py-2 text-xs">
                     <span className="font-mono">{l.label_no}</span>
                     <span className="text-muted-foreground">{l.tray_serial}</span>
-                    <Printer size={12} className="text-success" />
+                    <Printer size={12} className="text-muted-foreground" />
                   </li>
                 ))}
               </ul>
+              <p className="mt-2 text-[10px] text-muted-foreground">{NO_PHYSICAL_PRINT_NOTE}</p>
             </div>
           )}
         </div>

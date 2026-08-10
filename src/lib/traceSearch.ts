@@ -2,6 +2,11 @@
 // a flat document list, and supports prefix + fuzzy ranking (token-overlap +
 // Levenshtein) without adding a dependency.
 import { listTable } from "@/lib/data";
+import type { Carton, DplDocument, FinancePi, GateScanRow, ProductionLabel, ShippingLabelRow } from "@/lib/types";
+
+/** The underlying row a SearchDoc was built from. Callers should narrow via
+ *  SearchDoc.kind and cast to the matching row type from `@/lib/types`. */
+export type SearchDocRaw = unknown;
 
 export type EntityKind =
   | "production_label" | "carton" | "dpl" | "pi" | "shipping"
@@ -13,7 +18,7 @@ export interface SearchDoc {
   ref: string;            // canonical ref (label_no, carton_no, etc.)
   label: string;          // human-readable summary
   keywords: string[];     // searchable tokens (lowercased)
-  raw: any;
+  raw: SearchDocRaw;
 }
 
 const RECENT_KEY = "ols_recent_searches";
@@ -32,12 +37,12 @@ export function clearRecent() { try { localStorage.removeItem(RECENT_KEY); } cat
 
 export async function buildIndex(): Promise<SearchDoc[]> {
   const [labels, cartons, dpls, pis, shipping, gates] = await Promise.all([
-    listTable<any>("ols_production_labels"),
-    listTable<any>("ols_cartons"),
-    listTable<any>("ols_dpl_documents"),
-    listTable<any>("ols_finance_pi"),
-    listTable<any>("ols_shipping_labels"),
-    listTable<any>("ols_gate_scans"),
+    listTable<ProductionLabel>("ols_production_labels"),
+    listTable<Carton>("ols_cartons"),
+    listTable<DplDocument>("ols_dpl_documents"),
+    listTable<FinancePi>("ols_finance_pi"),
+    listTable<ShippingLabelRow>("ols_shipping_labels"),
+    listTable<GateScanRow>("ols_gate_scans"),
   ]);
   const docs: SearchDoc[] = [];
   const seenSku = new Set<string>(), seenBatch = new Set<string>(), seenCust = new Set<string>(), seenOrder = new Set<string>();
@@ -65,7 +70,7 @@ export async function buildIndex(): Promise<SearchDoc[]> {
   return docs;
 }
 
-function lower(arr: any[]): string[] {
+function lower(arr: unknown[]): string[] {
   return arr.filter(Boolean).map(v => String(v).toLowerCase());
 }
 

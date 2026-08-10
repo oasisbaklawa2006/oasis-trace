@@ -1,53 +1,85 @@
 import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
-import { listTable, insertRow, updateRow } from "@/lib/data";
+import { listTable } from "@/lib/data";
 import { num } from "@/lib/numbering";
 import { Tag, Printer } from "lucide-react";
 import { toast } from "sonner";
 import { LabelPreview } from "@/components/LabelPreview";
 import { StatusPill } from "@/components/StatusPill";
 import { ReprintModal } from "@/components/ReprintModal";
+import type { Carton, FinancePi, FinancePiCarton, ShippingLabelRow } from "@/lib/types";
+import { errorMessage } from "@/lib/utils";
+import { generateLabelCommand, recordLabelGenerated, NO_PHYSICAL_PRINT_NOTE } from "@/lib/labelPrintLog";
+import { buildShippingLabelPayload } from "@/lib/labelPayloads";
+import { traceMutations } from "@/lib/traceMutations";
 
 export default function ShippingLabel() {
-  const [cartons, setCartons] = useState<any[]>([]);
-  const [pis, setPis] = useState<any[]>([]);
-  const [labels, setLabels] = useState<any[]>([]);
-  const [reprint, setReprint] = useState<any | null>(null);
+  const [cartons, setCartons] = useState<Carton[]>([]);
+  const [pis, setPis] = useState<FinancePi[]>([]);
+  const [piCartons, setPiCartons] = useState<FinancePiCarton[]>([]);
+  const [labels, setLabels] = useState<ShippingLabelRow[]>([]);
+  const [reprint, setReprint] = useState<ShippingLabelRow | null>(null);
   const [labelError, setLabelError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => { reload(); }, []);
   async function reload() {
-    setCartons(await listTable("ols_cartons"));
-    setPis(await listTable("ols_finance_pi"));
-    setLabels(await listTable("ols_shipping_labels", { order: "created_at" }));
+    setCartons(await listTable<Carton>("ols_cartons"));
+    setPis(await listTable<FinancePi>("ols_finance_pi"));
+    // Real FK source for carton -> PI membership — never inferred from
+    // order_ref, which multiple PIs/DPLs can share.
+    setPiCartons(await listTable<FinancePiCarton>("ols_finance_pi_cartons"));
+    setLabels(await listTable<ShippingLabelRow>("ols_shipping_labels", { order: "created_at" }));
   }
 
   const eligible = cartons.filter(c => c.status === "invoiced");
 
-  async function generate(carton: any) {
+  async function generate(carton: Carton) {
     try {
       setLabelError(null);
       setIsSubmitting(true);
-      const pi = pis.find(p => p.order_ref === carton.order_ref && p.status === "cleared");
-      const lbl = await insertRow<any>("ols_shipping_labels", {
-        shipping_no: num.shipping(),
+      // Resolve the PI via authoritative carton membership (ols_finance_pi_cartons),
+      // never order_ref alone — an order can have multiple PIs/DPLs, and a
+      // guess here would risk generating a label against the wrong invoice.
+      const memberPiIds = new Set(piCartons.filter(pc => pc.carton_id === carton.id).map(pc => pc.pi_id));
+      const matchingClearedPis = pis.filter(p => memberPiIds.has(p.id) && p.status === "cleared");
+      if (matchingClearedPis.length !== 1) {
+        throw new Error(
+          matchingClearedPis.length === 0
+            ? "A cleared Finance PI containing this carton is required before generating a shipping label."
+            : "Carton is ambiguously linked to multiple cleared Finance PIs — cannot determine the correct invoice.",
+        );
+      }
+      const pi = matchingClearedPis[0];
+      // shipping_no and qr_ref are both randomly generated (numbering.ts)
+      // and unique — retry with fresh ids on a confirmed unique-constraint
+      // violation, bounded.
+      const shippingNo = num.shipping();
+      const lbl = await traceMutations.createShippingLabel({
+        shipping_no: shippingNo,
         carton_id: carton.id,
-        pi_id: pi?.id,
+        pi_id: pi.id,
         consignor: "Oasis Baklawa LLC",
         consignee: carton.customer_name,
         address: "—",
-        invoice_ref: pi?.invoice_ref,
+        invoice_ref: pi.invoice_ref,
         qr_ref: num.qrRef(),
-        status: "printed",
-      });
-      await updateRow("ols_cartons", carton.id, { status: "shipping_labelled" });
-      await insertRow("ols_print_logs", { ref_type: "shipping", ref_id: lbl.id, success: true });
-      toast.success(`Shipping label ${lbl.shipping_no} generated`);
+        // "generated" (not "printed") — no print transport exists yet, see
+        // labelPrintLog.ts. This status is otherwise only compared against
+        // "dispatched" downstream (GateScan), so this rename is safe.
+        status: "generated",
+      }, `shipping-label:${carton.id}`);
+      // Generate the TSPL command (proves GENERATED); best-effort clipboard
+      // copy. This is NOT a physical print — see labelPrintLog.ts header.
+      const { copiedToClipboard } = await generateLabelCommand(buildShippingLabelPayload({
+        consignee: carton.customer_name, invoiceRef: pi?.invoice_ref, shippingNo: lbl.shipping_no, qrRef: lbl.qr_ref,
+      }));
+      await recordLabelGenerated({ refType: "shipping", refId: lbl.id, copiedToClipboard });
+      toast.success(`Shipping label ${lbl.shipping_no} — command generated`, { description: NO_PHYSICAL_PRINT_NOTE });
       reload();
-    } catch (err: any) {
-      const msg = err?.message || "Failed to generate shipping label";
+    } catch (err: unknown) {
+      const msg = errorMessage(err, "Failed to generate shipping label");
       setLabelError(msg);
       toast.error(msg, { duration: Infinity });
     } finally {

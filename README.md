@@ -12,7 +12,7 @@ React · TypeScript · Tailwind · Supabase JS client · Vite
    VITE_SUPABASE_ANON_KEY=...
    ```
 2. Apply schema (one time): open Supabase SQL editor and run `db/ols_init.sql`. It is **idempotent** and **only creates new objects with the `ols_` prefix** — nothing existing is altered, dropped, or renamed.
-3. `bun install && bun run dev`
+3. `npm install && npm run dev`
 
 ## Database safety
 - All new tables use the `ols_` prefix.

@@ -8,20 +8,22 @@ import { Button } from "@/components/ui/button";
 import { PrintSheet } from "@/components/PrintSheet";
 import { Barcode } from "@/components/Barcode";
 import { LabelPreview } from "@/components/LabelPreview";
+import type { LucideIcon } from "lucide-react";
+import type { Carton, DplDocument, FinancePi, ShippingLabelRow } from "@/lib/types";
 
 export default function DispatchBundle() {
-  const [dpls, setDpls] = useState<any[]>([]);
-  const [pis, setPis] = useState<any[]>([]);
-  const [shipping, setShipping] = useState<any[]>([]);
-  const [cartons, setCartons] = useState<any[]>([]);
-  const [active, setActive] = useState<any | null>(null);
+  const [dpls, setDpls] = useState<DplDocument[]>([]);
+  const [pis, setPis] = useState<FinancePi[]>([]);
+  const [shipping, setShipping] = useState<ShippingLabelRow[]>([]);
+  const [cartons, setCartons] = useState<Carton[]>([]);
+  const [active, setActive] = useState<DplDocument | null>(null);
 
   useEffect(() => { (async () => {
     const [d, p, s, c] = await Promise.all([
-      listTable("ols_dpl_documents", { order: "created_at" }),
-      listTable("ols_finance_pi"),
-      listTable("ols_shipping_labels"),
-      listTable("ols_cartons"),
+      listTable<DplDocument>("ols_dpl_documents", { order: "created_at" }),
+      listTable<FinancePi>("ols_finance_pi"),
+      listTable<ShippingLabelRow>("ols_shipping_labels"),
+      listTable<Carton>("ols_cartons"),
     ]);
     setDpls(d); setPis(p); setShipping(s); setCartons(c);
   })(); }, []);
@@ -183,7 +185,7 @@ export default function DispatchBundle() {
     </div>
   );
 }
-function Row({ icon: I, label, value }: any) {
+function Row({ icon: I, label, value }: { icon: LucideIcon; label: string; value: string }) {
   return (
     <li className="flex items-center justify-between rounded-lg bg-secondary px-3 py-2 text-xs">
       <span className="flex items-center gap-2"><I size={13} className="text-muted-foreground" /> {label}</span>

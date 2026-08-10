@@ -6,6 +6,7 @@ import { signIn } from "@/lib/auth";
 import { supabaseConfigured } from "@/lib/supabase";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
+import { errorMessage } from "@/lib/utils";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -18,8 +19,8 @@ export default function Login() {
     try {
       await signIn(email.trim(), password);
       toast.success("Welcome back");
-    } catch (err: any) {
-      toast.error(err?.message || "Login failed");
+    } catch (err: unknown) {
+      toast.error(errorMessage(err, "Login failed"));
     } finally {
       setLoading(false);
     }
@@ -62,7 +63,7 @@ export default function Login() {
         </div>
 
         <p className="mt-6 text-center text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-          Test Mode — RLS Off
+          {supabaseConfigured ? "Supabase Mode" : "Demo Mode"}
         </p>
       </div>
     </div>

@@ -1,6 +1,22 @@
-// Scan input hook — autofocus recovery, Enter-to-submit, debounced duplicate
-// suppression, configurable cooldown between scans, and a torch helper for
-// devices with a rear camera (Sunmi / Honeywell / Zebra Android).
+// Scan input hook for keyboard-wedge/manual entry — autofocus recovery,
+// Enter-to-submit, debounced duplicate suppression, configurable cooldown
+// between scans, and optional batch/rapid-pack buffering.
+//
+// This hook is not currently wired into any screen — GateScan.tsx,
+// Cartonization.tsx and FinancePI.tsx each use a simpler inline
+// onKeyDown-Enter pattern. It's kept available (not dead code to delete)
+// because it materially improves on that pattern — real autofocus
+// recovery and duplicate-scan suppression that today rely entirely on
+// backend/service-layer idempotency checks — but wiring it into the
+// existing, already-tested scan screens was left out of this pass to
+// avoid UI regression risk without a way to manually verify hardware
+// scanner behavior in this environment. See the Trace forensic audit for
+// this decision.
+//
+// A previous version of this file also exported camera-torch helpers
+// (isTorchSupported/setTorch) for a camera-based scanning mode. That mode
+// was never built and is explicitly out of scope (keyboard-wedge/manual
+// entry is the approved architecture) — removed as genuinely dead code.
 import { useCallback, useEffect, useRef, useState } from "react";
 
 export type ScanMode = "single" | "batch" | "rapid-pack";
@@ -70,46 +86,3 @@ export function useScanLoop({
 
   return { ref, value, setValue, handleKey, submit, buffer, flushBatch };
 }
-
-// ---------- Flashlight / torch helper ----------
-//
-// Some warehouse Android devices expose `MediaTrackCapabilities.torch`. We
-// keep a single shared MediaStream so toggling does not re-prompt the user.
-let torchStream: MediaStream | null = null;
-let torchOn = false;
-
-export async function isTorchSupported(): Promise<boolean> {
-  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) return false;
-  try {
-    const s = torchStream || await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } } });
-    torchStream = s;
-    const track = s.getVideoTracks()[0];
-    const caps = (track as any).getCapabilities?.() || {};
-    return !!caps.torch;
-  } catch { return false; }
-}
-
-export async function setTorch(on: boolean): Promise<boolean> {
-  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) return false;
-  try {
-    if (!torchStream) {
-      torchStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } } });
-    }
-    const track = torchStream.getVideoTracks()[0];
-    await (track as any).applyConstraints({ advanced: [{ torch: on }] });
-    torchOn = on;
-    if (!on) {
-      // Free the camera when turning off
-      torchStream.getTracks().forEach(t => t.stop());
-      torchStream = null;
-    }
-    return true;
-  } catch (e) {
-    console.warn("[torch] toggle failed", e);
-    torchStream?.getTracks().forEach(t => t.stop());
-    torchStream = null;
-    return false;
-  }
-}
-
-export function isTorchOn(): boolean { return torchOn; }
