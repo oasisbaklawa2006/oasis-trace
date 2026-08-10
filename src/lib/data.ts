@@ -159,4 +159,25 @@ export async function updateRow<T = unknown>(table: string, id: string, patch: o
   return demo.update(table, id, patch) as T | undefined;
 }
 
+/** Invoke a governed Core RPC. Live mode fails closed; demo mode is unsupported. */
+export async function invokeTraceMutation<T>(
+  fn: string,
+  args: Record<string, unknown>,
+): Promise<T> {
+  if (!supabaseConfigured || !supabase) {
+    throw new Error("Governed Trace mutations require a configured Supabase backend.");
+  }
+  try {
+    return await withRetry(async () => {
+      const { data, error } = await withTimeout(supabase!.rpc(fn, args));
+      if (error) throw error;
+      setMode("live");
+      return data as T;
+    });
+  } catch (e: unknown) {
+    console.error(`[ols] RPC ${fn} failed:`, errorMessage(e));
+    throw new Error(`Trace operation rejected: ${errorMessage(e)}.`);
+  }
+}
+
 export const sourceLabel = supabaseConfigured ? "Supabase" : "Local demo";

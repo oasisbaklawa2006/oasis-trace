@@ -5,19 +5,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { listTable, insertRow } from "@/lib/data";
+import { listTable } from "@/lib/data";
 import { num } from "@/lib/numbering";
 import { LabelPreview } from "@/components/LabelPreview";
 import { Printer, Save } from "lucide-react";
 import { toast } from "sonner";
 import { StatusPill } from "@/components/StatusPill";
 import { useNavigate } from "react-router-dom";
-import type { Department, ProductCache, ProductionBatch, ProductionLabel } from "@/lib/types";
+import type { Department, ProductCache, ProductionLabel } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
 import { generateLabelCommandBatch, recordLabelGenerated, NO_PHYSICAL_PRINT_NOTE } from "@/lib/labelPrintLog";
 import { buildProductionLabelPayload } from "@/lib/labelPayloads";
-import { insertWithUniqueRetry } from "@/lib/insertWithRetry";
 import { computeBestBefore } from "@/lib/dateMath";
+import { traceMutations } from "@/lib/traceMutations";
 
 export default function ProductionEntry() {
   const nav = useNavigate();
@@ -55,7 +55,7 @@ export default function ProductionEntry() {
     setIsSubmitting(true);
     setSubmitError(null);
     try {
-      const batch = await insertRow<ProductionBatch>("ols_production_batches", {
+      const batchInput = {
         batch_no: form.batch_no,
         product_id: form.product_id,
         department_id: form.department_id,
@@ -64,17 +64,11 @@ export default function ProductionEntry() {
         shelf_life_days: Number(form.shelf_life_days),
         qc_status: form.qc_status,
         remarks: form.remarks,
-      });
+      };
       const trayCount = Math.max(1, Number(form.tray_count));
       const bestBefore = computeBestBefore(form.mfg_date, Number(form.shelf_life_days || 0));
-      const created: ProductionLabel[] = [];
-      for (let i = 0; i < trayCount; i++) {
-        // label_no is randomly generated (numbering.ts) and can collide
-        // under concurrent multi-terminal use — retry with a fresh id on a
-        // confirmed unique-constraint violation, bounded, never unbounded.
-        const label = await insertWithUniqueRetry<ProductionLabel>("ols_production_labels", () => ({
+      const labelInputs = Array.from({ length: trayCount }, (_, i) => ({
           label_no: num.productionLabel(),
-          batch_id: batch.id,
           product_id: form.product_id,
           department_id: form.department_id,
           tray_serial: `T-${i + 1}`,
@@ -86,14 +80,10 @@ export default function ProductionEntry() {
           operator_name: form.operator_name,
           status: "active",
           metadata: { product_name: product?.name, sku: product?.sku, department: departments.find(d => d.id === form.department_id)?.name },
-        }));
-        await insertRow("ols_stock_units", { production_label_id: label.id, current_location: "store", current_status: "in_stock" });
-        await insertRow("ols_inventory_movements", {
-          production_label_id: label.id, from_location: "production", to_location: "store",
-          movement_type: "production_inward", reference_no: batch.batch_no,
-        });
-        created.push(label);
-      }
+      }));
+      const { labels: created } = await traceMutations.createProduction(
+        batchInput, labelInputs, `create-production:${form.batch_no}`,
+      );
       // Generate every tray's TSPL command (proves GENERATED) and best-effort
       // copy the WHOLE batch to the clipboard as one block — copying per-tray
       // would overwrite the clipboard each time, leaving only the last

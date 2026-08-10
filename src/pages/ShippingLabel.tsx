@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
-import { listTable, insertRow, updateRow } from "@/lib/data";
+import { listTable } from "@/lib/data";
 import { num } from "@/lib/numbering";
 import { Tag, Printer } from "lucide-react";
 import { toast } from "sonner";
@@ -12,7 +12,7 @@ import type { Carton, FinancePi, ShippingLabelRow } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
 import { generateLabelCommand, recordLabelGenerated, NO_PHYSICAL_PRINT_NOTE } from "@/lib/labelPrintLog";
 import { buildShippingLabelPayload } from "@/lib/labelPayloads";
-import { insertWithUniqueRetry } from "@/lib/insertWithRetry";
+import { traceMutations } from "@/lib/traceMutations";
 
 export default function ShippingLabel() {
   const [cartons, setCartons] = useState<Carton[]>([]);
@@ -42,8 +42,9 @@ export default function ShippingLabel() {
       // shipping_no and qr_ref are both randomly generated (numbering.ts)
       // and unique — retry with fresh ids on a confirmed unique-constraint
       // violation, bounded.
-      const lbl = await insertWithUniqueRetry<ShippingLabelRow>("ols_shipping_labels", () => ({
-        shipping_no: num.shipping(),
+      const shippingNo = num.shipping();
+      const lbl = await traceMutations.createShippingLabel({
+        shipping_no: shippingNo,
         carton_id: carton.id,
         pi_id: pi.id,
         consignor: "Oasis Baklawa LLC",
@@ -55,8 +56,7 @@ export default function ShippingLabel() {
         // labelPrintLog.ts. This status is otherwise only compared against
         // "dispatched" downstream (GateScan), so this rename is safe.
         status: "generated",
-      }));
-      await updateRow("ols_cartons", carton.id, { status: "shipping_labelled" });
+      }, `shipping-label:${carton.id}`);
       // Generate the TSPL command (proves GENERATED); best-effort clipboard
       // copy. This is NOT a physical print — see labelPrintLog.ts header.
       const { copiedToClipboard } = await generateLabelCommand(buildShippingLabelPayload({

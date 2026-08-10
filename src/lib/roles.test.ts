@@ -15,4 +15,12 @@ describe("roles", () => {
     const session = { user: { app_metadata: {} } } as unknown as Session;
     expect(canSubmitCentralScan(session)).toBe(false);
   });
+
+  it("ignores caller-editable user_metadata roles", () => {
+    const session = {
+      user: { app_metadata: {}, user_metadata: { ols_roles: ["admin", "dispatch"] } },
+    } as unknown as Session;
+    expect(getOlsRolesFromSession(session)).toEqual([]);
+    expect(canSubmitCentralScan(session)).toBe(false);
+  });
 });

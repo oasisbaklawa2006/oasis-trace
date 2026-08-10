@@ -3,7 +3,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { listTable, insertRow } from "@/lib/data";
+import { listTable } from "@/lib/data";
 import { num } from "@/lib/numbering";
 import { Printer, FileText } from "lucide-react";
 import { toast } from "sonner";
@@ -13,8 +13,8 @@ import { StatusPill } from "@/components/StatusPill";
 import type { Carton, CartonContent, DplCarton, DplDocument, OrderCache, ProductionLabel } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
 import { rollupBySku } from "@/lib/piRollup";
-import { insertWithUniqueRetry } from "@/lib/insertWithRetry";
 import { resolveDplMemberCartons } from "@/lib/dplMembership";
+import { traceMutations } from "@/lib/traceMutations";
 
 export default function DPL() {
   const [orders, setOrders] = useState<OrderCache[]>([]);
@@ -55,8 +55,9 @@ export default function DPL() {
       // dpl_no is randomly generated (numbering.ts) and can collide under
       // concurrent multi-terminal use — retry with a fresh id on a
       // confirmed unique-constraint violation, bounded.
-      const dpl = await insertWithUniqueRetry<DplDocument>("ols_dpl_documents", () => ({
-        dpl_no: num.dpl(),
+      const dplNo = num.dpl();
+      const result = await traceMutations.createDpl({
+        dpl_no: dplNo,
         order_ref: orderRef,
         customer_name: order?.customer_name,
         destination: order?.destination,
@@ -65,11 +66,8 @@ export default function DPL() {
         total_gross: totals.gross,
         total_net: totals.net,
         status: "open",
-      }));
-      const newLinks: DplCarton[] = [];
-      for (let i = 0; i < cartonsForOrder.length; i++) {
-        newLinks.push(await insertRow<DplCarton>("ols_dpl_cartons", { dpl_id: dpl.id, carton_id: cartonsForOrder[i].id, position: i + 1 }));
-      }
+      }, cartonsForOrder.map(c => c.id), `create-dpl:${dplNo}`);
+      const { dpl, links: newLinks } = result;
       setDplCartons(prev => [...prev, ...newLinks]);
       setDpls(await listTable<DplDocument>("ols_dpl_documents", { order: "created_at" }));
       // All of cartonsForOrder were just linked to dpl.id above by

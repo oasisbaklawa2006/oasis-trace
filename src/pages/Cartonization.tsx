@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CentralPayloadPreview } from "@/components/CentralPayloadPreview";
-import { listTable, insertRow, updateRow } from "@/lib/data";
+import { listTable, insertRow } from "@/lib/data";
 import { num } from "@/lib/numbering";
 import { buildCartonMetadata, resolveCartonBarcodeDisplay } from "@/lib/barcodeCarton";
 import { supportsCentralBarcode } from "@/lib/scanContract";
@@ -24,9 +24,10 @@ import {
 import type { CentralScanSyncStatus } from "@/lib/centralScanStatus";
 import type { Carton, CartonContent, OrderCache, ProductionLabel } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
-import { generateLabelCommand, recordLabelGenerated, NO_PHYSICAL_PRINT_NOTE } from "@/lib/labelPrintLog";
+import { generateLabelCommand, NO_PHYSICAL_PRINT_NOTE } from "@/lib/labelPrintLog";
 import { buildCartonLabelPayload } from "@/lib/labelPayloads";
 import { insertWithUniqueRetry } from "@/lib/insertWithRetry";
+import { traceMutations } from "@/lib/traceMutations";
 
 interface CartonContentWithLabel extends CartonContent {
   label?: ProductionLabel;
@@ -162,10 +163,6 @@ export default function Cartonization() {
       }
       const net = contents.reduce((s, c) => s + (c.label?.net_weight || 0), 0);
       const gross = contents.reduce((s, c) => s + (c.label?.gross_weight || 0), 0);
-      await updateRow("ols_cartons", carton.id, {
-        status: "packed", packed_at: new Date().toISOString(),
-        net_weight: net, gross_weight: gross,
-      });
       // Generate the TSPL command (proves GENERATED); best-effort clipboard
       // copy. This is NOT a physical print — see labelPrintLog.ts header.
       const { copiedToClipboard } = await generateLabelCommand(buildCartonLabelPayload({
@@ -173,7 +170,9 @@ export default function Cartonization() {
         cartonIndex: carton.carton_index, itemCount: contents.length,
         netWeightKg: net, barcode: barcodeDisplay?.labelBarcode || carton.carton_no,
       }));
-      await recordLabelGenerated({ refType: "carton", refId: carton.id, copiedToClipboard });
+      await traceMutations.finalizeCarton(
+        carton.id, net, gross, copiedToClipboard, `finalize-carton:${carton.id}`,
+      );
       toast.success("Carton packed — label command generated", { description: NO_PHYSICAL_PRINT_NOTE });
       setCarton(null); setContents([]); setIdentityResult(null);
       setRecentCartons(await listTable<Carton>("ols_cartons", { order: "created_at", limit: 6 }));

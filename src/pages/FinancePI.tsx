@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { listTable, insertRow, updateRow } from "@/lib/data";
+import { listTable } from "@/lib/data";
 import { num } from "@/lib/numbering";
 import { ScanBarcode, BadgeCheck, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
@@ -12,8 +12,8 @@ import { StatusPill } from "@/components/StatusPill";
 import type { Carton, CartonContent, DplCarton, FinancePi, FinancePiCarton, ProductionLabel } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
 import { rollupBySku } from "@/lib/piRollup";
-import { insertWithUniqueRetry } from "@/lib/insertWithRetry";
 import { validateCartonForPi } from "@/lib/dplMembership";
+import { traceMutations } from "@/lib/traceMutations";
 
 export default function FinancePI() {
   const [cartons, setCartons] = useState<Carton[]>([]);
@@ -56,25 +56,15 @@ export default function FinancePI() {
       const membership = validateCartonForPi(c.id, active?.dpl_id, dplCartons);
       if (!membership.ok) { toast.error(membership.reason || "Carton rejected"); setScan(""); return; }
 
-      let pi = active;
-      if (!pi) {
-        // pi_no is randomly generated (numbering.ts) and can collide under
-        // concurrent multi-terminal use — retry with a fresh id on a
-        // confirmed unique-constraint violation, bounded.
-        pi = await insertWithUniqueRetry<FinancePi>("ols_finance_pi", () => ({
-          pi_no: num.pi(),
-          dpl_id: membership.dplId,
-          order_ref: c.order_ref,
-          customer_name: c.customer_name,
-          status: "pending",
-        }));
-        setActive(pi);
-        setPis(prev => [pi as FinancePi, ...prev]);
-      }
+      const piNo = active?.pi_no ?? num.pi();
+      const result = await traceMutations.addCartonToPi(
+        c.id, active?.id ?? null, piNo, `pi-carton:${active?.id ?? piNo}:${c.id}`,
+      );
+      const pi = result.pi;
+      if (!active) { setActive(pi); setPis(prev => [pi, ...prev]); }
       const dup = piCartons.find(p => p.pi_id === pi.id && p.carton_id === c.id);
       if (dup) { toast.error("Carton already on this PI"); setScan(""); return; }
-      const link = await insertRow<FinancePiCarton>("ols_finance_pi_cartons", { pi_id: pi.id, carton_id: c.id });
-      await updateRow("ols_cartons", c.id, { status: "finance_received" });
+      const link: FinancePiCarton = { id: result.link_id, pi_id: pi.id, carton_id: c.id };
       setPiCartons(prev => [...prev, link]);
       setCartons(prev => prev.map(x => x.id === c.id ? { ...x, status: "finance_received" } : x));
       setScan("");
@@ -93,14 +83,11 @@ export default function FinancePI() {
       if (!active) return;
       if (!invoiceRef) { toast.error("Enter invoice reference"); return; }
       setIsSubmitting(true);
-      await updateRow("ols_finance_pi", active.id, { status: "cleared", cleared_at: new Date().toISOString(), invoice_ref: invoiceRef });
       const linked = piCartons.filter(p => p.pi_id === active.id).map(p => p.carton_id);
-      for (const cid of linked) await updateRow("ols_cartons", cid, { status: "invoiced" });
-
       const rollup = rollupBySku(linked.filter((id): id is string => !!id), contents, labels);
-      for (const v of rollup) {
-        await insertRow("ols_finance_pi_lines", { pi_id: active.id, sku: v.sku, product_name: v.name, quantity: v.qty, net_weight: v.net, gross_weight: v.gross });
-      }
+      await traceMutations.clearPi(active.id, invoiceRef, rollup.map(v => ({
+        sku: v.sku, product_name: v.name, quantity: v.qty, net_weight: v.net, gross_weight: v.gross,
+      })), `clear-pi:${active.id}`);
       toast.success("PI cleared — shipping labels can now be generated");
       setActive(null); setInvoiceRef("");
       await reload();
