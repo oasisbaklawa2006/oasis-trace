@@ -5,16 +5,21 @@ import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PRESET_SIZES } from "@/lib/labelSizes";
 import { LabelPreview } from "@/components/LabelPreview";
-import { generateTSPL, generateZPL, type Rotation } from "@/lib/printerCommands";
-import { Copy, Printer, RotateCw, Save } from "lucide-react";
+import { generateTSPL, generateZPL, type Rotation, type PrinterProfile } from "@/lib/printerCommands";
+import { sendToPrintBridge, connectionIsConfigured, type PrinterConnection } from "@/lib/printBridge";
+import { Copy, Printer, RotateCw, Save, Send } from "lucide-react";
 import { toast } from "sonner";
-import type { LabelTemplateRow } from "@/lib/types";
+import type { LabelTemplateRow, PrinterRow } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
 
 export default function Templates() {
   const [templates, setTemplates] = useState<LabelTemplateRow[]>([]);
+  const [printers, setPrinters] = useState<PrinterRow[]>([]);
+  const [printerId, setPrinterId] = useState<string>("");
+  const [sending, setSending] = useState(false);
   const [active, setActive] = useState<LabelTemplateRow | null>(null);
   const [sizeId, setSizeId] = useState("75x50");
   const [showQr, setShowQr] = useState(false);
@@ -48,6 +53,25 @@ export default function Templates() {
     const t = await reload();
     if (t[0]) applyTemplate(t[0]);
   })(); }, []);
+
+  useEffect(() => { (async () => {
+    const rows = await listTable<PrinterRow>("ols_printers");
+    setPrinters(rows);
+    if (rows[0]) setPrinterId(rows[0].id);
+  })(); }, []);
+
+  const selectedPrinter = printers.find(p => p.id === printerId) ?? null;
+  const selectedConnection = (selectedPrinter?.settings as PrinterConnection | undefined) ?? {};
+  const canSendToPrinter = connectionIsConfigured(selectedConnection);
+
+  async function sendToSelectedPrinter(cmd: string) {
+    if (!selectedPrinter || !connectionIsConfigured(selectedConnection)) return;
+    setSending(true);
+    const result = await sendToPrintBridge(selectedConnection, cmd);
+    setSending(false);
+    if (result.ok) toast.success("Sent to printer", { description: result.message });
+    else toast.error("Send failed", { description: result.message });
+  }
 
   const size = PRESET_SIZES.find(s => s.id === sizeId)!;
 
@@ -157,9 +181,19 @@ export default function Templates() {
             />
           </div>
 
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <Select value={printerId} onValueChange={setPrinterId}>
+              <SelectTrigger className="h-9 w-56"><SelectValue placeholder="Send to printer…" /></SelectTrigger>
+              <SelectContent>{printers.map(p => <SelectItem key={p.id} value={p.id}>{p.name} ({p.command_lang})</SelectItem>)}</SelectContent>
+            </Select>
+            <p className="text-[11px] text-muted-foreground">
+              {canSendToPrinter ? "Bridge-connected — Send buttons go straight to the printer." : "No network target configured for this printer — set one up in Printer Management."}
+            </p>
+          </div>
+
           <div className="mt-6 grid gap-3 md:grid-cols-2">
-            <CmdCard title="TSPL" code={generateTSPL(payload)} onCopy={copy} />
-            <CmdCard title="ZPL" code={generateZPL(payload)} onCopy={copy} />
+            <CmdCard title="TSPL" code={generateTSPL(payload)} onCopy={copy} onSend={canSendToPrinter ? sendToSelectedPrinter : undefined} sending={sending} />
+            <CmdCard title="ZPL" code={generateZPL(payload)} onCopy={copy} onSend={canSendToPrinter ? sendToSelectedPrinter : undefined} sending={sending} />
           </div>
 
           <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -183,12 +217,19 @@ export default function Templates() {
 function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
   return <div className="flex items-center justify-between"><span className="text-xs">{label}</span><Switch checked={checked} onCheckedChange={onChange} /></div>;
 }
-function CmdCard({ title, code, onCopy }: { title: string; code: string; onCopy: (s: string) => void }) {
+function CmdCard({ title, code, onCopy, onSend, sending }: { title: string; code: string; onCopy: (s: string) => void; onSend?: (s: string) => void; sending?: boolean }) {
   return (
     <div className="rounded-xl border bg-surface">
       <div className="flex items-center justify-between border-b px-3 py-2">
         <span className="text-xs font-semibold">{title}</span>
-        <Button size="sm" variant="ghost" onClick={() => onCopy(code)}><Copy size={14} className="mr-1" /> Copy</Button>
+        <div className="flex items-center gap-1">
+          {onSend && (
+            <Button size="sm" variant="ghost" onClick={() => onSend(code)} disabled={sending}>
+              <Send size={14} className="mr-1" /> {sending ? "Sending…" : "Send"}
+            </Button>
+          )}
+          <Button size="sm" variant="ghost" onClick={() => onCopy(code)}><Copy size={14} className="mr-1" /> Copy</Button>
+        </div>
       </div>
       <pre className="max-h-44 overflow-auto p-3 text-[10px] leading-snug text-muted-foreground">{code}</pre>
     </div>
