@@ -10,24 +10,54 @@ import { StatusPill } from "@/components/StatusPill";
 import { Printer, Wrench, Save } from "lucide-react";
 import { generateTSPL, generateZPL, testPrintPayload, type PrinterProfile } from "@/lib/printerCommands";
 import { PRINTER_PRESETS, presetByKey } from "@/lib/printerPresets";
+import { sendToPrintBridge, checkPrintBridgeHealth, connectionIsConfigured, type PrinterConnection } from "@/lib/printBridge";
 import { toast } from "sonner";
 import type { PrinterRow } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
 
+const DEFAULT_BRIDGE_URL = "http://127.0.0.1:9191";
+
 export default function Printers() {
   const [printers, setPrinters] = useState<PrinterRow[]>([]);
   const [editing, setEditing] = useState<PrinterRow | null>(null);
+  const [bridgeOnline, setBridgeOnline] = useState<boolean | null>(null);
 
   useEffect(() => { reload(); }, []);
   async function reload() { setPrinters(await listTable<PrinterRow>("ols_printers")); }
 
+  useEffect(() => {
+    let cancelled = false;
+    async function poll() {
+      const ok = await checkPrintBridgeHealth(DEFAULT_BRIDGE_URL);
+      if (!cancelled) setBridgeOnline(ok);
+    }
+    poll();
+    const id = setInterval(poll, 15000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
+
   return (
     <div>
-      <PageHeader eyebrow="Setup" title="Printer Management" description="TSPL & ZPL command generation, calibration, presets for TSC TE244, Zebra GK420, XPrinter, generic TSPL/ZPL." />
+      <PageHeader
+        eyebrow="Setup"
+        title="Printer Management"
+        description="TSPL & ZPL command generation, calibration, presets for TSC TE244, Zebra GK420, XPrinter, generic TSPL/ZPL."
+        actions={
+          <div className="flex items-center gap-2 text-xs">
+            <span className={`h-2 w-2 rounded-full ${bridgeOnline ? "bg-success" : "bg-destructive"}`} />
+            <span className="text-muted-foreground">
+              Local print bridge ({DEFAULT_BRIDGE_URL}): {bridgeOnline === null ? "checking…" : bridgeOnline ? "online" : "offline"}
+            </span>
+          </div>
+        }
+      />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {printers.map(p => <PrinterCard key={p.id} printer={p} onEdit={() => setEditing(p)} />)}
       </div>
-      <p className="mt-4 text-xs text-muted-foreground">Local print bridge integration is reserved for the next phase — commands above are generated client-side and copied to clipboard.</p>
+      <p className="mt-4 text-xs text-muted-foreground">
+        Commands are generated client-side. Configure a printer's bridge URL, host and port below to send a test print
+        directly via the local print bridge (<code className="font-mono">node scripts/print-bridge.mjs</code>) — otherwise they're copied to clipboard.
+      </p>
       {editing && (
         <CalibrationDrawer printer={editing} onClose={() => setEditing(null)} onSaved={async () => { setEditing(null); await reload(); }} />
       )}
@@ -36,10 +66,23 @@ export default function Printers() {
 }
 
 function PrinterCard({ printer, onEdit }: { printer: PrinterRow; onEdit: () => void }) {
-  const profile: PrinterProfile = (printer.settings as PrinterProfile) || {};
-  function testPrint() {
+  const profile: PrinterProfile & PrinterConnection = (printer.settings as PrinterProfile & PrinterConnection) || {};
+  const hasConnection = connectionIsConfigured(profile);
+  const [sending, setSending] = useState(false);
+
+  async function testPrint() {
     const payload = testPrintPayload(profile);
     const cmd = printer.command_lang === "ZPL" ? generateZPL(payload) : generateTSPL(payload);
+
+    if (connectionIsConfigured(profile)) {
+      setSending(true);
+      const result = await sendToPrintBridge(profile, cmd);
+      setSending(false);
+      if (result.ok) { toast.success("Test print sent", { description: result.message }); return; }
+      toast.error("Print bridge send failed", { description: result.message });
+      // Fall through to clipboard so the operator still has the commands.
+    }
+
     try {
       navigator.clipboard.writeText(cmd);
       toast.success("Test print commands copied", { description: `${printer.command_lang} for ${printer.name}` });
@@ -65,10 +108,13 @@ function PrinterCard({ printer, onEdit }: { printer: PrinterRow; onEdit: () => v
         <Stat row="DPI" v={String(profile.dpi ?? 203)} />
         <Stat row="Thermal Y mm" v={String(profile.thermalOffsetMm ?? 0)} />
         <Stat row="X offset mm" v={String(profile.xOffsetMm ?? 0)} />
+        <Stat row="Network target" v={hasConnection ? `${profile.host}:${profile.port}` : "Not configured"} />
       </div>
       <div className="mt-4 flex gap-2">
         <Button size="sm" variant="outline" className="flex-1" onClick={onEdit}><Wrench size={14} className="mr-1" /> Calibrate</Button>
-        <Button size="sm" className="flex-1 bg-gradient-primary text-primary-foreground" onClick={testPrint}>Test Print</Button>
+        <Button size="sm" className="flex-1 bg-gradient-primary text-primary-foreground" onClick={testPrint} disabled={sending}>
+          {sending ? "Sending…" : hasConnection ? "Test Print (bridge)" : "Test Print (copy)"}
+        </Button>
       </div>
     </div>
   );
@@ -83,7 +129,7 @@ function Stat({ row, v }: { row: string; v: string }) {
 }
 
 function CalibrationDrawer({ printer, onClose, onSaved }: { printer: PrinterRow; onClose: () => void; onSaved: () => void }) {
-  const initial: PrinterProfile = (printer.settings as PrinterProfile) || {};
+  const initial: PrinterProfile & PrinterConnection = (printer.settings as PrinterProfile & PrinterConnection) || {};
   const [presetKey, setPresetKey] = useState<string>("");
   const [darkness, setDarkness] = useState([initial.darkness ?? 8]);
   const [speed, setSpeed] = useState([initial.speed ?? 4]);
@@ -92,6 +138,9 @@ function CalibrationDrawer({ printer, onClose, onSaved }: { printer: PrinterRow;
   const [dpi, setDpi] = useState(String(initial.dpi ?? 203));
   const [thermalY, setThermalY] = useState(String(initial.thermalOffsetMm ?? 0));
   const [xOff, setXOff] = useState(String(initial.xOffsetMm ?? 0));
+  const [bridgeUrl, setBridgeUrl] = useState(initial.bridgeUrl ?? "http://127.0.0.1:9191");
+  const [host, setHost] = useState(initial.host ?? "");
+  const [port, setPort] = useState(String(initial.port ?? 9100));
   const [busy, setBusy] = useState(false);
 
   function applyPreset(k: string) {
@@ -106,7 +155,7 @@ function CalibrationDrawer({ printer, onClose, onSaved }: { printer: PrinterRow;
 
   async function save() {
     setBusy(true);
-    const profile: PrinterProfile & { presetKey?: string } = {
+    const profile: PrinterProfile & PrinterConnection & { presetKey?: string } = {
       darkness: darkness[0], speed: speed[0],
       gapMm: Number(gap) || 3,
       blackMarkMm: bm ? Number(bm) : undefined,
@@ -114,6 +163,9 @@ function CalibrationDrawer({ printer, onClose, onSaved }: { printer: PrinterRow;
       thermalOffsetMm: Number(thermalY) || 0,
       xOffsetMm: Number(xOff) || 0,
       presetKey: presetKey || undefined,
+      bridgeUrl: bridgeUrl.trim() || undefined,
+      host: host.trim() || undefined,
+      port: Number(port) || undefined,
     };
     try {
       await updateRow("ols_printers", printer.id, { settings: profile });
@@ -150,6 +202,18 @@ function CalibrationDrawer({ printer, onClose, onSaved }: { printer: PrinterRow;
             <div><Label className="mb-1.5 block text-xs">DPI</Label><Input value={dpi} onChange={e => setDpi(e.target.value)} type="number" /></div>
             <div><Label className="mb-1.5 block text-xs">Thermal Y comp (mm)</Label><Input value={thermalY} onChange={e => setThermalY(e.target.value)} type="number" step="0.1" /></div>
             <div><Label className="mb-1.5 block text-xs">X offset (mm)</Label><Input value={xOff} onChange={e => setXOff(e.target.value)} type="number" step="0.1" /></div>
+          </div>
+          <div className="space-y-3 rounded-lg border bg-surface p-3">
+            <p className="text-xs font-semibold">Network target (via local print bridge)</p>
+            <div>
+              <Label className="mb-1.5 block text-xs">Print bridge URL</Label>
+              <Input value={bridgeUrl} onChange={e => setBridgeUrl(e.target.value)} placeholder="http://127.0.0.1:9191" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label className="mb-1.5 block text-xs">Printer host/IP</Label><Input value={host} onChange={e => setHost(e.target.value)} placeholder="192.168.1.50" /></div>
+              <div><Label className="mb-1.5 block text-xs">Printer port</Label><Input value={port} onChange={e => setPort(e.target.value)} type="number" placeholder="9100" /></div>
+            </div>
+            <p className="text-[11px] text-muted-foreground">Leave host blank to keep using copy-to-clipboard for this printer.</p>
           </div>
         </div>
 
