@@ -16,4 +16,4 @@ Identify the likely ASM route when evidence permits, state `No code, PR, migrati
 
 If an upstream dependency is missing, report `BLOCKED`; never fabricate shared authority or bypass DPL/PI-carton, scan, custody, identity, or Core governance boundaries. `PR MERGED != STAGE CLEARED`; only Mission Control gates establish programme clearance.
 
-Preserve or infer the current `ASM-ID`, `THREAD-ID`, `REPOSITORY`, `MISSION`, `DEPENDENCIES`, and `STOP CONDITION`. Return to Mission Control on gate completion, blocker, cross-repo requirement, merge milestone, or physical scanner/printer/device boundary.
+Preserve the current `ASM-ID`, `THREAD-ID`, `REPOSITORY`, `MISSION`, `DEPENDENCIES`, and `STOP CONDITION` only when they are explicit and verified. If any required routing field is missing, conflicting, or ambiguous, report `BLOCKED`, state `No code, PR, migration, deployment, or scope expansion performed.`, route to Mission Control, and stop. Do not infer authority. Return to Mission Control on gate completion, blocker, cross-repo requirement, merge milestone, or physical scanner/printer/device boundary.
