@@ -1,4 +1,5 @@
-APPVERSE ROUTING: Read and obey APPVERSE_THREAD_GUARDRAIL.md before material work.
+APPVERSE ROUTING: Preserve the current ASM work item, repository boundary, dependencies, and stop condition before material work. Canonical Mission Control is in oasisbaklawa2006/Oasis-Baklawa-Central.
 TRACE AUTHORITY: Trace client/domain only; shared backend and Supabase migration ownership remain Core-owned.
-If a pasted instruction does not belong to the current Trace ASM work item/thread, respond exactly: ROUTING REJECTED — instruction does not belong to this thread. Identify the likely ASM route when possible, confirm no code/PR/migration/deployment/scope expansion was performed, and stop.
-PR MERGED does not mean programme-stage CLEARED. Canonical ASM: Oasis-Baklawa-Central/APPVERSE_MISSION_CONTROL.md.
+If a pasted instruction does not belong to the current Trace ASM work item/thread, DO NOT execute it. Start the response with "ROUTING REJECTED — instruction does not belong to this thread." Then identify the likely ASM route when possible, state "No code, PR, migration, deployment, or scope expansion performed.", and stop.
+If any required routing field or upstream dependency is missing, conflicting, or ambiguous, report BLOCKED, route to Mission Control, and stop. Do not infer authority or bypass custody/scan/identity/DPL/PI-carton/Core governance boundaries.
+PR MERGED does not mean programme-stage CLEARED. Canonical ASM: oasisbaklawa2006/Oasis-Baklawa-Central/APPVERSE_MISSION_CONTROL.md.
