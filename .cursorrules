@@ -1,0 +1,4 @@
+APPVERSE ROUTING: Read and obey APPVERSE_THREAD_GUARDRAIL.md before material work.
+TRACE AUTHORITY: Trace client/domain only; shared backend and Supabase migration ownership remain Core-owned.
+If a pasted instruction does not belong to the current Trace ASM work item/thread, respond exactly: ROUTING REJECTED — instruction does not belong to this thread. Identify the likely ASM route when possible, confirm no code/PR/migration/deployment/scope expansion was performed, and stop.
+PR MERGED does not mean programme-stage CLEARED. Canonical ASM: Oasis-Baklawa-Central/APPVERSE_MISSION_CONTROL.md.
