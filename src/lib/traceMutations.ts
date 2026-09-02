@@ -1,5 +1,5 @@
 import { invokeTraceMutation } from "@/lib/data";
-import type { Carton, DplDocument, FinancePi, ProductionBatch, ProductionLabel, ShippingLabelRow } from "@/lib/types";
+import type { Carton, DplDocument, FinancePi, PrinterRow, ProductionBatch, ProductionLabel, ShippingLabelRow } from "@/lib/types";
 
 export interface ProductionMutationResult { batch: ProductionBatch; labels: ProductionLabel[] }
 export interface PiCartonMutationResult { pi: FinancePi; carton: Carton; link_id: string }
@@ -17,4 +17,9 @@ export const traceMutations = {
     invokeTraceMutation<FinancePi>("trace_clear_pi_v1", { p_pi_id: piId, p_invoice_ref: invoiceRef, p_lines: lines, p_idempotency_key: idempotencyKey }),
   createShippingLabel: (input: Record<string, unknown>, idempotencyKey: string) =>
     invokeTraceMutation<ShippingLabelRow>("trace_create_shipping_label_v1", { p_input: input, p_idempotency_key: idempotencyKey }),
+  savePrinterSettings: (printerId: string, settings: Record<string, unknown>) =>
+    invokeTraceMutation<PrinterRow>("trace_save_printer_settings_v1", {
+      p_printer_id: printerId,
+      p_settings: settings,
+    }),
 };

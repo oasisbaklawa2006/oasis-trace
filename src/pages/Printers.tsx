@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
-import { listTable, updateRow } from "@/lib/data";
+import { listTable } from "@/lib/data";
+import { traceMutations } from "@/lib/traceMutations";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Input } from "@/components/ui/input";
@@ -168,7 +169,7 @@ function CalibrationDrawer({ printer, onClose, onSaved }: { printer: PrinterRow;
       port: Number(port) || undefined,
     };
     try {
-      await updateRow("ols_printers", printer.id, { settings: profile });
+      await traceMutations.savePrinterSettings(printer.id, { ...profile });
       toast.success("Printer profile saved"); onSaved();
     } catch (e: unknown) { toast.error("Save failed", { description: errorMessage(e) }); }
     finally { setBusy(false); }
