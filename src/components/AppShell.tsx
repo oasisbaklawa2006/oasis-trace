@@ -8,6 +8,11 @@ import {
 import { supabaseConfigured } from "@/lib/supabase";
 import { probeLiveMode, subscribeMode, subscribeOnline } from "@/lib/data";
 import { subscribeQueue, flush as flushQueue } from "@/lib/offlineQueue";
+import {
+  flushScanSubmitQueue,
+  registerScanQueueSessionProvider,
+  subscribeScanQueue,
+} from "@/lib/scanSubmitQueue";
 import { signOut, useAuthSession } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
@@ -36,6 +41,7 @@ export default function AppShell() {
   const [, setModeError] = useState<string | undefined>();
   const [online, setOnline] = useState(true);
   const [pendingQueue, setPendingQueue] = useState(0);
+  const [pendingScanQueue, setPendingScanQueue] = useState(0);
   const { session } = useAuthSession();
   const location = useLocation();
   useEffect(() => setOpen(false), [location.pathname]);
@@ -43,9 +49,13 @@ export default function AppShell() {
     const off = subscribeMode((m, err) => { setMode(m); setModeError(err); });
     const offOnline = subscribeOnline(setOnline);
     const offQueue = subscribeQueue(setPendingQueue);
+    const offScanQueue = subscribeScanQueue(setPendingScanQueue);
+    registerScanQueueSessionProvider(() => session);
     probeLiveMode();
-    return () => { off(); offOnline(); offQueue(); };
-  }, []);
+    return () => { off(); offOnline(); offQueue(); offScanQueue(); };
+  }, [session]);
+
+  const totalPending = pendingQueue + pendingScanQueue;
 
   const grouped = NAV.reduce<Record<string, typeof NAV>>((acc, item) => {
     (acc[item.group] ||= []).push(item);
@@ -135,13 +145,18 @@ export default function AppShell() {
         {!online && (
           <div className="border-b bg-destructive/15 px-6 py-2 text-xs font-semibold text-destructive no-print flex items-center justify-between gap-4">
             <span>Offline mode — actions are queued and will sync when the connection returns.</span>
-            {pendingQueue > 0 && <span className="rounded-full bg-destructive/30 px-2 py-0.5 text-[10px]">{pendingQueue} queued</span>}
+            {totalPending > 0 && <span className="rounded-full bg-destructive/30 px-2 py-0.5 text-[10px]">{totalPending} queued</span>}
           </div>
         )}
-        {online && pendingQueue > 0 && (
+        {online && totalPending > 0 && (
           <div className="border-b bg-warning/15 px-6 py-2 text-xs font-semibold text-warning-foreground no-print flex items-center justify-between gap-4">
-            <span>{pendingQueue} action(s) waiting to sync to Supabase.</span>
-            <button onClick={() => flushQueue()} className="rounded-full bg-warning/30 px-2 py-0.5 text-[10px] hover:bg-warning/40">Retry now</button>
+            <span>{totalPending} action(s) waiting to sync to Supabase.</span>
+            <button
+              onClick={() => { void flushQueue(); void flushScanSubmitQueue(session); }}
+              className="rounded-full bg-warning/30 px-2 py-0.5 text-[10px] hover:bg-warning/40"
+            >
+              Retry now
+            </button>
           </div>
         )}
         {!supabaseConfigured && (
