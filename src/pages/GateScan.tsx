@@ -10,11 +10,11 @@ import { ShieldCheck, ShieldAlert, ScanLine, Volume2, VolumeX } from "lucide-rea
 import { feedback, isFeedbackEnabled, setFeedbackEnabled } from "@/lib/scanFeedback";
 import { toast } from "sonner";
 import { useOlsSession } from "@/hooks/useOlsSession";
+import { usePendingCentralSubmitSync } from "@/hooks/usePendingCentralSubmitSync";
 import {
-  submitCentralScan,
-  retryCentralScan,
-  type CentralSubmitResult,
-} from "@/lib/centralSubmit";
+  submitWithOfflineRetry,
+} from "@/lib/scanSubmitQueue";
+import type { CentralSubmitResult } from "@/lib/centralSubmit";
 import type { CentralScanSyncStatus } from "@/lib/centralScanStatus";
 import type { Carton, FinancePi, GateScanRow, OrderCache, ShippingLabelRow } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
@@ -33,6 +33,8 @@ export default function GateScan() {
   const [scanError, setScanError] = useState<string | null>(null);
   const { session, canSubmitCentral } = useOlsSession();
   const inputRef = useRef<HTMLInputElement>(null);
+
+  usePendingCentralSubmitSync(ctnResult?.idempotencyKey, setSubmitResult);
 
   useEffect(() => { reload(); inputRef.current?.focus(); }, []);
   async function reload() {
@@ -142,7 +144,7 @@ export default function GateScan() {
   async function handleSubmitCentral() {
     if (!ctnResult?.payload || !ctnResult.idempotencyKey) return;
     setSubmitting(true);
-    const r = await submitCentralScan({
+    const r = await submitWithOfflineRetry({
       idempotencyKey: ctnResult.idempotencyKey,
       payload: ctnResult.payload as unknown as Record<string, unknown>,
       scanHistoryId: ctnResult.scanHistoryId,
@@ -152,13 +154,14 @@ export default function GateScan() {
     setSubmitting(false);
     if (r.ok) toast.success(r.message);
     else if (r.duplicate) toast.warning(r.message);
+    else if (r.queued) toast.info(r.message);
     else toast.error(r.message);
   }
 
   async function handleRetryCentral() {
     if (!ctnResult?.payload || !ctnResult.idempotencyKey) return;
     setSubmitting(true);
-    const r = await retryCentralScan({
+    const r = await submitWithOfflineRetry({
       idempotencyKey: ctnResult.idempotencyKey,
       payload: ctnResult.payload as unknown as Record<string, unknown>,
       scanHistoryId: ctnResult.scanHistoryId,
@@ -167,6 +170,8 @@ export default function GateScan() {
     setSubmitResult(r);
     setSubmitting(false);
     if (r.ok) toast.success(r.message);
+    else if (r.duplicate) toast.warning(r.message);
+    else if (r.queued) toast.info(r.message);
     else toast.error(r.message);
   }
 

@@ -16,11 +16,9 @@ import { toast } from "sonner";
 import { StatusPill } from "@/components/StatusPill";
 import { feedback } from "@/lib/scanFeedback";
 import { useOlsSession } from "@/hooks/useOlsSession";
-import {
-  submitCentralScan,
-  retryCentralScan,
-  type CentralSubmitResult,
-} from "@/lib/centralSubmit";
+import { usePendingCentralSubmitSync } from "@/hooks/usePendingCentralSubmitSync";
+import { submitWithOfflineRetry } from "@/lib/scanSubmitQueue";
+import type { CentralSubmitResult } from "@/lib/centralSubmit";
 import type { CentralScanSyncStatus } from "@/lib/centralScanStatus";
 import type { Carton, CartonContent, OrderCache, ProductionLabel } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
@@ -48,6 +46,8 @@ export default function Cartonization() {
   const [cartonError, setCartonError] = useState<string | null>(null);
   const { session, canSubmitCentral } = useOlsSession();
   const [recentCartons, setRecentCartons] = useState<Carton[]>([]);
+
+  usePendingCentralSubmitSync(identityResult?.idempotencyKey, setSubmitResult);
 
   const barcodeDisplay = carton
     ? resolveCartonBarcodeDisplay(carton.order_ref || "", carton.carton_no, carton.metadata)
@@ -192,7 +192,7 @@ export default function Cartonization() {
     try {
       setCartonError(null);
       setSubmitting(true);
-      const r = await submitCentralScan({
+      const r = await submitWithOfflineRetry({
         idempotencyKey: identityResult.idempotencyKey,
         payload: identityResult.payload as unknown as Record<string, unknown>,
         scanHistoryId: identityResult.scanHistoryId,
@@ -201,6 +201,7 @@ export default function Cartonization() {
       setSubmitResult(r);
       if (r.ok) toast.success(r.message);
       else if (r.duplicate) toast.warning(r.message);
+      else if (r.queued) toast.info(r.message);
       else toast.error(r.message);
     } catch (err: unknown) {
       const msg = errorMessage(err, "Failed to submit carton identity to Central");
@@ -216,7 +217,7 @@ export default function Cartonization() {
     try {
       setCartonError(null);
       setSubmitting(true);
-      const r = await retryCentralScan({
+      const r = await submitWithOfflineRetry({
         idempotencyKey: identityResult.idempotencyKey,
         payload: identityResult.payload as unknown as Record<string, unknown>,
         scanHistoryId: identityResult.scanHistoryId,
@@ -224,6 +225,8 @@ export default function Cartonization() {
       });
       setSubmitResult(r);
       if (r.ok) toast.success(r.message);
+      else if (r.duplicate) toast.warning(r.message);
+      else if (r.queued) toast.info(r.message);
       else toast.error(r.message);
     } catch (err: unknown) {
       const msg = errorMessage(err, "Failed to retry carton identity submission");
