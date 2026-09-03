@@ -167,6 +167,7 @@ export default function GateScan() {
     setSubmitResult(r);
     setSubmitting(false);
     if (r.ok) toast.success(r.message);
+    else if (r.duplicate) toast.warning(r.message);
     else if (r.queued) toast.info(r.message);
     else toast.error(r.message);
   }

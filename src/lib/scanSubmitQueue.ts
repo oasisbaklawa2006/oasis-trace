@@ -20,6 +20,8 @@ export interface PendingScanEnvelope {
   idempotencyKey: string;
   payload: Record<string, unknown>;
   scanHistoryId?: string;
+  /** Immutable owner captured at enqueue time — replay only under matching session. */
+  ownerUserId: string;
   enqueuedAt: number;
   attempts: number;
   nextRetryAt: number;
@@ -62,6 +64,10 @@ export function isPermanentSubmitFailure(reason?: string): boolean {
   return false;
 }
 
+function currentOwnerId(): string | undefined {
+  return sessionProvider?.()?.user?.id;
+}
+
 function notify() {
   const size = getRetryableQueueSize();
   listeners.forEach(l => l(size));
@@ -93,6 +99,11 @@ function backoffMs(attempts: number): number {
 }
 
 function upsertEnvelope(req: CentralSubmitRequest): PendingScanEnvelope {
+  const ownerUserId = req.session?.user?.id;
+  if (!ownerUserId) {
+    throw new Error("Session required to enqueue scan submission");
+  }
+
   const queue = loadQueue();
   const existing = queue.find(e => e.idempotencyKey === req.idempotencyKey);
   if (existing && !existing.permanentFailure) {
@@ -102,6 +113,7 @@ function upsertEnvelope(req: CentralSubmitRequest): PendingScanEnvelope {
     idempotencyKey: req.idempotencyKey,
     payload: req.payload,
     scanHistoryId: req.scanHistoryId,
+    ownerUserId,
     enqueuedAt: Date.now(),
     attempts: 0,
     nextRetryAt: Date.now(),
@@ -127,7 +139,13 @@ export function getPendingScans(): PendingScanEnvelope[] {
 }
 
 export function getRetryableQueueSize(): number {
-  return loadQueue().filter(e => !e.permanentFailure).length;
+  const ownerId = currentOwnerId();
+  return loadQueue().filter(e => {
+    if (e.permanentFailure) return false;
+    if (!e.ownerUserId) return false;
+    if (ownerId && e.ownerUserId !== ownerId) return false;
+    return true;
+  }).length;
 }
 
 export function getPermanentFailures(): PendingScanEnvelope[] {
@@ -227,6 +245,7 @@ export async function submitWithOfflineRetry(
   }
 
   if (isPermanentSubmitFailure(result.failureReason)) {
+    enqueuePendingScan(req);
     markPermanentFailure(req.idempotencyKey, result);
     return result;
   }
@@ -264,9 +283,12 @@ export async function flushScanSubmitQueue(
         permanent++;
         continue;
       }
+      if (!item.ownerUserId || item.ownerUserId !== session.user.id) {
+        continue;
+      }
       if (!shouldAttemptNow(item, now)) {
         skipped++;
-        continue;
+        break;
       }
 
       const req: CentralSubmitRequest = {
@@ -282,7 +304,7 @@ export async function flushScanSubmitQueue(
       } catch (err: unknown) {
         recordTransientFailure(item.idempotencyKey, errorMessage(err));
         failed++;
-        continue;
+        break;
       }
 
       if (result.ok || result.duplicate) {
@@ -299,6 +321,7 @@ export async function flushScanSubmitQueue(
 
       recordTransientFailure(item.idempotencyKey, result.message);
       failed++;
+      break;
     }
   } finally {
     flushing = false;
@@ -312,6 +335,13 @@ let sessionProvider: (() => Session | null) | null = null;
 /** Register auth session source for reconnect / interval auto-flush. */
 export function registerScanQueueSessionProvider(provider: () => Session | null) {
   sessionProvider = provider;
+  notify();
+}
+
+/** Clear session provider on unmount/logout to prevent stale-session replay. */
+export function unregisterScanQueueSessionProvider() {
+  sessionProvider = null;
+  notify();
 }
 
 // Auto-replay on reconnect + periodic flush while retryable items remain.

@@ -12,6 +12,7 @@ import {
   flushScanSubmitQueue,
   registerScanQueueSessionProvider,
   subscribeScanQueue,
+  unregisterScanQueueSessionProvider,
 } from "@/lib/scanSubmitQueue";
 import { signOut, useAuthSession } from "@/lib/auth";
 import { cn } from "@/lib/utils";
@@ -52,7 +53,13 @@ export default function AppShell() {
     const offScanQueue = subscribeScanQueue(setPendingScanQueue);
     registerScanQueueSessionProvider(() => session);
     probeLiveMode();
-    return () => { off(); offOnline(); offQueue(); offScanQueue(); };
+    return () => {
+      off();
+      offOnline();
+      offQueue();
+      offScanQueue();
+      unregisterScanQueueSessionProvider();
+    };
   }, [session]);
 
   const totalPending = pendingQueue + pendingScanQueue;

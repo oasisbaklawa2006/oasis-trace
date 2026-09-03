@@ -7,8 +7,10 @@ import {
   getPermanentFailures,
   getRetryableQueueSize,
   isPermanentSubmitFailure,
+  registerScanQueueSessionProvider,
   removePendingScan,
   submitWithOfflineRetry,
+  unregisterScanQueueSessionProvider,
 } from "./scanSubmitQueue";
 
 const dispatchPayload = {
@@ -26,6 +28,10 @@ const dispatchPayload = {
 
 const session = {
   user: { id: "u1", app_metadata: { ols_roles: ["dispatch"] } },
+} as unknown as Session;
+
+const otherSession = {
+  user: { id: "u2", app_metadata: { ols_roles: ["dispatch"] } },
 } as unknown as Session;
 
 const submitMock = vi.fn();
@@ -58,6 +64,7 @@ describe("scanSubmitQueue", () => {
   beforeEach(() => {
     localStorage.clear();
     submitMock.mockReset();
+    unregisterScanQueueSessionProvider();
     vi.mocked(isOnline).mockReturnValue(true);
     vi.stubEnv("VITE_CENTRAL_SCAN_SUBMIT_ENABLED", "true");
   });
@@ -241,5 +248,85 @@ describe("scanSubmitQueue", () => {
     expect(getPendingScans()).toHaveLength(1);
     removePendingScan("k-remove");
     expect(getPendingScans()).toHaveLength(0);
+  });
+
+  it("persists initial online permanent rejection", async () => {
+    submitMock.mockResolvedValueOnce({
+      ok: false,
+      status: "failed",
+      message: "Dispatch or security role required",
+      failureReason: "forbidden",
+    });
+
+    const r = await submitWithOfflineRetry({
+      idempotencyKey: "k-online-perm",
+      payload: dispatchPayload,
+      session,
+    });
+
+    expect(r.failureReason).toBe("forbidden");
+    const failures = getPermanentFailures();
+    expect(failures).toHaveLength(1);
+    expect(failures[0].idempotencyKey).toBe("k-online-perm");
+    expect(failures[0].ownerUserId).toBe("u1");
+  });
+
+  it("strict FIFO: delayed oldest blocks later eligible item", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+
+    submitMock.mockResolvedValueOnce({
+      ok: false,
+      status: "failed",
+      message: "Edge function error",
+      failureReason: "edge_timeout",
+    });
+
+    await submitWithOfflineRetry({
+      idempotencyKey: "k-a",
+      payload: dispatchPayload,
+      session,
+    });
+
+    enqueuePendingScan({
+      idempotencyKey: "k-b",
+      payload: { ...dispatchPayload, order_id: "order-2" },
+      session,
+    });
+
+    submitMock.mockClear();
+    const flush = await flushScanSubmitQueue(session);
+    expect(flush.skipped).toBe(1);
+    expect(submitMock).not.toHaveBeenCalled();
+    expect(getPendingScans().map(e => e.idempotencyKey)).toEqual(["k-a", "k-b"]);
+
+    vi.useRealTimers();
+  });
+
+  it("owner mismatch cannot replay another user's queued scan", async () => {
+    enqueuePendingScan({
+      idempotencyKey: "k-owner-a",
+      payload: dispatchPayload,
+      session,
+    });
+
+    submitMock.mockClear();
+    await flushScanSubmitQueue(otherSession);
+    expect(submitMock).not.toHaveBeenCalled();
+    expect(getPendingScans()).toHaveLength(1);
+    expect(getPendingScans()[0].ownerUserId).toBe("u1");
+  });
+
+  it("getRetryableQueueSize scopes to registered session owner", () => {
+    enqueuePendingScan({
+      idempotencyKey: "k-session",
+      payload: dispatchPayload,
+      session,
+    });
+    registerScanQueueSessionProvider(() => otherSession);
+    expect(getRetryableQueueSize()).toBe(0);
+    registerScanQueueSessionProvider(() => session);
+    expect(getRetryableQueueSize()).toBe(1);
+    unregisterScanQueueSessionProvider();
   });
 });

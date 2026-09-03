@@ -222,6 +222,7 @@ export default function Cartonization() {
       });
       setSubmitResult(r);
       if (r.ok) toast.success(r.message);
+      else if (r.duplicate) toast.warning(r.message);
       else if (r.queued) toast.info(r.message);
       else toast.error(r.message);
     } catch (err: unknown) {
