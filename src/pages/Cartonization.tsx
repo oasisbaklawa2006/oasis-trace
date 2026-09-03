@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { StatusPill } from "@/components/StatusPill";
 import { feedback } from "@/lib/scanFeedback";
 import { useOlsSession } from "@/hooks/useOlsSession";
+import { usePendingCentralSubmitSync } from "@/hooks/usePendingCentralSubmitSync";
 import { submitWithOfflineRetry } from "@/lib/scanSubmitQueue";
 import type { CentralSubmitResult } from "@/lib/centralSubmit";
 import type { CentralScanSyncStatus } from "@/lib/centralScanStatus";
@@ -45,6 +46,8 @@ export default function Cartonization() {
   const [cartonError, setCartonError] = useState<string | null>(null);
   const { session, canSubmitCentral } = useOlsSession();
   const [recentCartons, setRecentCartons] = useState<Carton[]>([]);
+
+  usePendingCentralSubmitSync(identityResult?.idempotencyKey, setSubmitResult);
 
   const barcodeDisplay = carton
     ? resolveCartonBarcodeDisplay(carton.order_ref || "", carton.carton_no, carton.metadata)

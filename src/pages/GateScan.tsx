@@ -10,6 +10,7 @@ import { ShieldCheck, ShieldAlert, ScanLine, Volume2, VolumeX } from "lucide-rea
 import { feedback, isFeedbackEnabled, setFeedbackEnabled } from "@/lib/scanFeedback";
 import { toast } from "sonner";
 import { useOlsSession } from "@/hooks/useOlsSession";
+import { usePendingCentralSubmitSync } from "@/hooks/usePendingCentralSubmitSync";
 import {
   submitWithOfflineRetry,
 } from "@/lib/scanSubmitQueue";
@@ -32,6 +33,8 @@ export default function GateScan() {
   const [scanError, setScanError] = useState<string | null>(null);
   const { session, canSubmitCentral } = useOlsSession();
   const inputRef = useRef<HTMLInputElement>(null);
+
+  usePendingCentralSubmitSync(ctnResult?.idempotencyKey, setSubmitResult);
 
   useEffect(() => { reload(); inputRef.current?.focus(); }, []);
   async function reload() {

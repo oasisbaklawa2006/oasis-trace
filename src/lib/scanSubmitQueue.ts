@@ -53,7 +53,9 @@ const PERMANENT_FAILURE_REASONS = new Set([
 ]);
 
 type QueueListener = (size: number) => void;
+type ResolutionListener = (idempotencyKey: string, result: CentralSubmitResult) => void;
 const listeners = new Set<QueueListener>();
+const resolutionListeners = new Set<ResolutionListener>();
 let flushing = false;
 
 export function isPermanentSubmitFailure(reason?: string): boolean {
@@ -156,6 +158,16 @@ export function subscribeScanQueue(listener: QueueListener): () => void {
   listeners.add(listener);
   listener(getRetryableQueueSize());
   return () => listeners.delete(listener);
+}
+
+/** Fired when a queued envelope is resolved (background or inline replay). */
+export function subscribeScanSubmitResolution(listener: ResolutionListener): () => void {
+  resolutionListeners.add(listener);
+  return () => resolutionListeners.delete(listener);
+}
+
+function emitScanSubmitResolution(idempotencyKey: string, result: CentralSubmitResult) {
+  resolutionListeners.forEach(l => l(idempotencyKey, result));
 }
 
 function markPermanentFailure(
@@ -309,12 +321,14 @@ export async function flushScanSubmitQueue(
 
       if (result.ok || result.duplicate) {
         removePendingScan(item.idempotencyKey);
+        emitScanSubmitResolution(item.idempotencyKey, result);
         ok++;
         continue;
       }
 
       if (isPermanentSubmitFailure(result.failureReason)) {
         markPermanentFailure(item.idempotencyKey, result);
+        emitScanSubmitResolution(item.idempotencyKey, result);
         permanent++;
         continue;
       }

@@ -9,6 +9,7 @@ import {
   isPermanentSubmitFailure,
   registerScanQueueSessionProvider,
   removePendingScan,
+  subscribeScanSubmitResolution,
   submitWithOfflineRetry,
   unregisterScanQueueSessionProvider,
 } from "./scanSubmitQueue";
@@ -328,5 +329,55 @@ describe("scanSubmitQueue", () => {
     registerScanQueueSessionProvider(() => session);
     expect(getRetryableQueueSize()).toBe(1);
     unregisterScanQueueSessionProvider();
+  });
+
+  it("emits resolution when background flush succeeds", async () => {
+    const resolved: Array<{ key: string; status: string }> = [];
+    const off = subscribeScanSubmitResolution((key, result) => {
+      resolved.push({ key, status: result.status });
+    });
+
+    enqueuePendingScan({
+      idempotencyKey: "k-bg",
+      payload: dispatchPayload,
+      session,
+    });
+
+    submitMock.mockResolvedValueOnce({
+      ok: true,
+      status: "submitted",
+      message: "Submitted to Central",
+      centralReference: "CENTRAL-BG-1",
+    });
+
+    await flushScanSubmitQueue(session);
+
+    expect(resolved).toEqual([{ key: "k-bg", status: "submitted" }]);
+    off();
+  });
+
+  it("emits resolution when background flush hits permanent failure", async () => {
+    const resolved: Array<{ key: string; failureReason?: string }> = [];
+    const off = subscribeScanSubmitResolution((key, result) => {
+      resolved.push({ key, failureReason: result.failureReason });
+    });
+
+    enqueuePendingScan({
+      idempotencyKey: "k-bg-perm",
+      payload: dispatchPayload,
+      session,
+    });
+
+    submitMock.mockResolvedValueOnce({
+      ok: false,
+      status: "failed",
+      message: "Dispatch or security role required",
+      failureReason: "forbidden",
+    });
+
+    await flushScanSubmitQueue(session);
+
+    expect(resolved).toEqual([{ key: "k-bg-perm", failureReason: "forbidden" }]);
+    off();
   });
 });
