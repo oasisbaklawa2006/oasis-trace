@@ -7,6 +7,7 @@ import type { Session } from "@supabase/supabase-js";
 import type { CentralScanSyncStatus } from "@/lib/centralScanStatus";
 import { listTable, updateRow } from "@/lib/data";
 import { getScanUserMessage } from "@/lib/scanContract";
+import { validateCentralSubmitEnvelope } from "@/lib/centralTraceContract";
 import { errorMessage } from "@/lib/utils";
 
 export function isCentralSubmitEnabled(): boolean {
@@ -231,6 +232,16 @@ export async function submitCentralScan(req: CentralSubmitRequest): Promise<Cent
       status: "failed",
       message: errorMessage(e),
       failureReason: "forbidden",
+    };
+  }
+
+  const contract = validateCentralSubmitEnvelope(req.idempotencyKey, req.payload);
+  if (contract.ok === false) {
+    return {
+      ok: false,
+      status: "failed",
+      message: contract.message,
+      failureReason: "invalid_contract",
     };
   }
 
