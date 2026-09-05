@@ -46,10 +46,14 @@ Programmatic export: `CENTRAL_TRACE_PRODUCER_CONSUMER_MATRIX` in `src/lib/centra
 
 | Function | Purpose |
 |----------|---------|
-| `validateCentralScanPayload` | Zod fail-closed v1.0 shape check |
+| `validateCentralScanPayload` | Zod fail-closed v1.0 shape check (`.strict()`; unknown top-level fields rejected) |
 | `validateIdempotencyKeyConsistency` | Key must match payload identity |
 | `validateCentralSubmitEnvelope` | Full pre-submit gate in `centralSubmit` |
 | `isPermanentContractFailure` | Contract rejections are non-retryable |
+
+**v1.0 payload rules:** Both `dispatch_gate` and `carton` schemas use Zod `.strict()`. The only optional extension field is `contract_version` with literal value `"1.0"`. Any other unrecognized top-level field fails closed as `invalid_contract`.
+
+**Idempotency key normalization:** `submitCentralScan` trims the accepted key once and uses that normalized value for validation, duplicate lookup (`hasCentralSubmission`), mock storage, and edge-function transport — padded and unpadded keys share the same submission identity.
 
 Wired into `submitCentralScan` before network/mock submit. `invalid_contract` added to permanent failure set in `scanSubmitQueue`.
 
@@ -65,6 +69,8 @@ Wired into `submitCentralScan` before network/mock submit. `invalid_contract` ad
 | Unauthorized role | `centralSubmit.test.ts`, `roles.test.ts` |
 | Stale / duplicate / retry | `scanService.test.ts`, `centralSubmit.test.ts`, `scanSubmitQueue.test.ts` |
 | Unknown version / shape | `centralTraceContract.test.ts` |
+| Unrecognized strict-schema field | `centralTraceContract.test.ts` |
+| Padded idempotency key duplicate | `centralSubmit.test.ts` |
 | Central authority reject (mock) | `centralSubmit.test.ts`, `scanSubmitQueue.test.ts` |
 
 ---

@@ -145,6 +145,29 @@ describe("validateCentralScanPayload — unknown version / shape", () => {
     expect(r.ok).toBe(false);
     if (r.ok === false) expect(r.code).toBe("unknown_contract_version");
   });
+
+  it("accepts optional literal contract_version on strict v1 schema", () => {
+    const payload = buildDispatchGateScanPayload({
+      order_id: ORDER_ID,
+      order_number: "SO-2026-0001",
+      barcode_value: "CTN-SO-2026-0001",
+      expected_barcode: "CTN-SO-2026-0001",
+    });
+    const r = validateCentralScanPayload({ ...payload, contract_version: "1.0" });
+    expect(r.ok).toBe(true);
+  });
+
+  it("rejects unrecognized top-level field on strict v1 schema", () => {
+    const payload = buildDispatchGateScanPayload({
+      order_id: ORDER_ID,
+      order_number: "SO-2026-0001",
+      barcode_value: "CTN-SO-2026-0001",
+      expected_barcode: "CTN-SO-2026-0001",
+    });
+    const r = validateCentralScanPayload({ ...payload, unexpected_field: "reject-me" });
+    expect(r.ok).toBe(false);
+    if (r.ok === false) expect(r.code).toBe("invalid_contract");
+  });
 });
 
 describe("validateIdempotencyKeyConsistency — duplicate / retry safety", () => {

@@ -154,31 +154,37 @@ export const CENTRAL_TRACE_PRODUCER_CONSUMER_MATRIX = [
 
 const verificationStatusSchema = z.enum(["verified", "mismatch", "rejected"]);
 
-const dispatchGatePayloadSchema = z.object({
-  source_app: z.literal(SOURCE_APP),
-  order_id: z.string().uuid({ message: "order_id must be a UUID" }),
-  order_number: z.string().regex(ORDER_NUMBER_RE, "order_number must match SO-YYYY-####"),
-  scan_type: z.literal("dispatch_gate"),
-  verification_type: z.literal("gate_check"),
-  entity_type: z.literal("order"),
-  barcode_value: z.string().min(1),
-  expected_barcode: z.string().min(1),
-  verification_status: verificationStatusSchema,
-  scan_source: z.literal("barcode_app_gate_scan"),
-});
+const dispatchGatePayloadSchema = z
+  .object({
+    contract_version: z.literal(CENTRAL_TRACE_CONTRACT_VERSION).optional(),
+    source_app: z.literal(SOURCE_APP),
+    order_id: z.string().uuid({ message: "order_id must be a UUID" }),
+    order_number: z.string().regex(ORDER_NUMBER_RE, "order_number must match SO-YYYY-####"),
+    scan_type: z.literal("dispatch_gate"),
+    verification_type: z.literal("gate_check"),
+    entity_type: z.literal("order"),
+    barcode_value: z.string().min(1),
+    expected_barcode: z.string().min(1),
+    verification_status: verificationStatusSchema,
+    scan_source: z.literal("barcode_app_gate_scan"),
+  })
+  .strict();
 
-const cartonIdentityPayloadSchema = z.object({
-  source_app: z.literal(SOURCE_APP),
-  order_id: z.string().uuid().optional(),
-  order_number: z.string().regex(ORDER_NUMBER_RE).optional(),
-  scan_type: z.literal("carton"),
-  verification_type: z.literal("identity_match"),
-  entity_type: z.literal("order"),
-  barcode_value: z.string().min(1),
-  expected_barcode: z.string().optional(),
-  verification_status: verificationStatusSchema,
-  scan_source: z.literal("barcode_app_carton_scan"),
-});
+const cartonIdentityPayloadSchema = z
+  .object({
+    contract_version: z.literal(CENTRAL_TRACE_CONTRACT_VERSION).optional(),
+    source_app: z.literal(SOURCE_APP),
+    order_id: z.string().uuid().optional(),
+    order_number: z.string().regex(ORDER_NUMBER_RE).optional(),
+    scan_type: z.literal("carton"),
+    verification_type: z.literal("identity_match"),
+    entity_type: z.literal("order"),
+    barcode_value: z.string().min(1),
+    expected_barcode: z.string().optional(),
+    verification_status: verificationStatusSchema,
+    scan_source: z.literal("barcode_app_carton_scan"),
+  })
+  .strict();
 
 const centralScanPayloadSchema = z.discriminatedUnion("scan_type", [
   dispatchGatePayloadSchema,
@@ -191,7 +197,8 @@ function formatZodErrors(error: z.ZodError): string[] {
 
 /**
  * Fail-closed validation of a Central scan payload (v1.0 shape).
- * Unknown top-level scan_type or extra version fields are rejected safely.
+ * Unknown top-level scan_type, unrecognized fields (.strict()), or unsupported
+ * contract_version values are rejected safely.
  */
 export function validateCentralScanPayload(
   input: unknown,

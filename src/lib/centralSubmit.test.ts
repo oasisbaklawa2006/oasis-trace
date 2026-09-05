@@ -110,6 +110,18 @@ describe("submitCentralScan", () => {
     expect(dup.message).toBe("Scan already recorded");
   });
 
+  it("blocks padded idempotency key duplicate in mock mode", async () => {
+    const key = "barcode_app|dispatch_gate|CTN-SO-2026-0001|550e8400-e29b-41d4-a716-446655440001";
+    await submitCentralScan({ idempotencyKey: key, payload: dispatchPayload, session });
+    const dup = await submitCentralScan({
+      idempotencyKey: `  ${key}  `,
+      payload: dispatchPayload,
+      session,
+    });
+    expect(dup.duplicate).toBe(true);
+    expect(dup.message).toBe("Scan already recorded");
+  });
+
   it("retry after mock failure path uses same key", async () => {
     const key = "barcode_app|dispatch_gate|CTN-SO-2026-0001|550e8400-e29b-41d4-a716-446655440001";
     const first = await submitCentralScan({

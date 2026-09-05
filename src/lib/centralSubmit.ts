@@ -235,7 +235,10 @@ export async function submitCentralScan(req: CentralSubmitRequest): Promise<Cent
     };
   }
 
-  const contract = validateCentralSubmitEnvelope(req.idempotencyKey, req.payload);
+  const idempotencyKey = req.idempotencyKey.trim();
+  const normalizedReq: CentralSubmitRequest = { ...req, idempotencyKey };
+
+  const contract = validateCentralSubmitEnvelope(idempotencyKey, normalizedReq.payload);
   if (contract.ok === false) {
     return {
       ok: false,
@@ -245,7 +248,7 @@ export async function submitCentralScan(req: CentralSubmitRequest): Promise<Cent
     };
   }
 
-  if (req.payload.verification_status !== "verified") {
+  if (normalizedReq.payload.verification_status !== "verified") {
     return {
       ok: false,
       status: "failed",
@@ -254,7 +257,7 @@ export async function submitCentralScan(req: CentralSubmitRequest): Promise<Cent
     };
   }
 
-  if (await hasCentralSubmission(req.idempotencyKey)) {
+  if (await hasCentralSubmission(idempotencyKey)) {
     return {
       ok: false,
       duplicate: true,
@@ -263,8 +266,8 @@ export async function submitCentralScan(req: CentralSubmitRequest): Promise<Cent
     };
   }
 
-  if (req.scanHistoryId) {
-    await patchScanHistoryMetadata(req.scanHistoryId, {
+  if (normalizedReq.scanHistoryId) {
+    await patchScanHistoryMetadata(normalizedReq.scanHistoryId, {
       central_sync_status: "retry_pending",
     });
   }
@@ -279,10 +282,10 @@ export async function submitCentralScan(req: CentralSubmitRequest): Promise<Cent
   }
 
   if (supabaseConfigured && supabase) {
-    return submitViaEdgeFunction(req);
+    return submitViaEdgeFunction(normalizedReq);
   }
 
-  return submitViaMock(req);
+  return submitViaMock(normalizedReq);
 }
 
 /** Retry a failed submit (same idempotency key). */
