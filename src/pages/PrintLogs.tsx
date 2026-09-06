@@ -10,17 +10,33 @@ import type { ReprintRefType } from "@/lib/reprintPolicy";
 import { executeGovernedReprint, rebuildGovernedPrintRequest, NO_PHYSICAL_PRINT_NOTE } from "@/lib/governedPrint";
 import { toast } from "sonner";
 import { errorMessage } from "@/lib/utils";
+import { useDeviceSurface } from "@/context/DeviceSurfaceContext";
 
 export default function PrintLogs() {
   const [logs, setLogs] = useState<PrintLogRow[]>([]);
   const [reprint, setReprint] = useState<PrintLogRow | null>(null);
+  const { readOnly, can, capabilityGuidance } = useDeviceSurface();
+  const allowReprint = !readOnly && can("reprint");
 
   useEffect(() => { reload(); }, []);
   async function reload() { setLogs(await listTable<PrintLogRow>("ols_print_logs", { order: "created_at" })); }
 
   return (
     <div>
-      <PageHeader eyebrow="Operations" title="Print Logs & Reprint Control" description="Every print creates a log. Reprints require reason, user, count, and apply a watermark." />
+      <PageHeader
+        eyebrow="Operations"
+        title="Print Logs & Reprint Control"
+        description={
+          allowReprint
+            ? "Every print creates a log. Reprints require reason, user, count, and apply a watermark."
+            : "Read-only print log view — reprint controls require a PC operations station."
+        }
+      />
+      {readOnly && (
+        <div className="mb-4 rounded-xl border border-secondary bg-secondary/30 px-4 py-3 text-sm text-secondary-foreground">
+          {capabilityGuidance("reprint")}
+        </div>
+      )}
       <div className="ols-card p-5">
         {logs.length === 0 ? <EmptyState icon={<History />} title="No prints yet" /> : (
           <table className="w-full text-sm">
@@ -32,7 +48,7 @@ export default function PrintLogs() {
                 <th className="px-3 py-2">Reprint</th>
                 <th className="px-3 py-2">Reason</th>
                 <th className="px-3 py-2">Result</th>
-                <th className="px-3 py-2"></th>
+                {allowReprint && <th className="px-3 py-2"></th>}
               </tr>
             </thead>
             <tbody>
@@ -44,11 +60,13 @@ export default function PrintLogs() {
                   <td className="px-3 py-2">{l.is_reprint ? `× ${l.reprint_count}` : "—"}</td>
                   <td className="px-3 py-2 text-xs text-muted-foreground">{l.metadata?.reason || "—"}</td>
                   <td className="px-3 py-2">{l.success ? "✅" : "⚠"}</td>
-                  <td className="px-3 py-2 text-right">
-                    <Button size="sm" variant="ghost" onClick={() => setReprint(l)}>
-                      <Printer size={12} className="mr-1" /> Reprint
-                    </Button>
-                  </td>
+                  {allowReprint && (
+                    <td className="px-3 py-2 text-right">
+                      <Button size="sm" variant="ghost" onClick={() => setReprint(l)}>
+                        <Printer size={12} className="mr-1" /> Reprint
+                      </Button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -56,7 +74,7 @@ export default function PrintLogs() {
         )}
       </div>
 
-      {reprint && (
+      {allowReprint && reprint && (
         <ReprintModal
           open={!!reprint}
           onOpenChange={(o) => !o && setReprint(null)}

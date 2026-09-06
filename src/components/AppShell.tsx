@@ -16,6 +16,8 @@ import {
 } from "@/lib/scanSubmitQueue";
 import { signOut, useAuthSession } from "@/lib/auth";
 import { cn } from "@/lib/utils";
+import { useDeviceSurface } from "@/context/DeviceSurfaceContext";
+import { navRoutesForSurface, surfaceDisplayLabel } from "@/lib/deviceSurfaceContract";
 
 const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, group: "Overview" },
@@ -44,7 +46,10 @@ export default function AppShell() {
   const [pendingQueue, setPendingQueue] = useState(0);
   const [pendingScanQueue, setPendingScanQueue] = useState(0);
   const { session } = useAuthSession();
+  const { surface, readOnly } = useDeviceSurface();
   const location = useLocation();
+  const allowedRoutes = new Set(navRoutesForSurface(surface).map(r => r.route));
+  const visibleNav = NAV.filter(item => allowedRoutes.has(item.to));
   useEffect(() => setOpen(false), [location.pathname]);
   useEffect(() => {
     const off = subscribeMode((m, err) => { setMode(m); setModeError(err); });
@@ -64,7 +69,7 @@ export default function AppShell() {
 
   const totalPending = pendingQueue + pendingScanQueue;
 
-  const grouped = NAV.reduce<Record<string, typeof NAV>>((acc, item) => {
+  const grouped = visibleNav.reduce<Record<string, typeof visibleNav>>((acc, item) => {
     (acc[item.group] ||= []).push(item);
     return acc;
   }, {});
@@ -125,6 +130,9 @@ export default function AppShell() {
           ))}
         </nav>
         <div className="space-y-2 px-6 pb-6 text-[11px] text-sidebar-foreground/55">
+          <div className="inline-flex items-center gap-1.5 rounded-full border border-sidebar-border/60 bg-sidebar-accent/40 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-sidebar-foreground/80">
+            {surfaceDisplayLabel(surface)}
+          </div>
           <div className={cn(
             "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]",
             mode === "live" ? "border-success/50 bg-success/15 text-success"
@@ -149,6 +157,11 @@ export default function AppShell() {
       {open && <div className="fixed inset-0 z-40 bg-black/40 lg:hidden" onClick={() => setOpen(false)} />}
 
       <main className="lg:pl-72">
+        {readOnly && (
+          <div className="border-b bg-secondary/80 px-6 py-2 text-xs font-semibold text-secondary-foreground no-print">
+            Read-only display mode — write, scan, and print controls are disabled on this surface.
+          </div>
+        )}
         {!online && (
           <div className="border-b bg-destructive/15 px-6 py-2 text-xs font-semibold text-destructive no-print flex items-center justify-between gap-4">
             <span>Offline mode — actions are queued and will sync when the connection returns.</span>
@@ -158,12 +171,14 @@ export default function AppShell() {
         {online && totalPending > 0 && (
           <div className="border-b bg-warning/15 px-6 py-2 text-xs font-semibold text-warning-foreground no-print flex items-center justify-between gap-4">
             <span>{totalPending} action(s) waiting to sync to Supabase.</span>
-            <button
-              onClick={() => { void flushQueue(); void flushScanSubmitQueue(session); }}
-              className="rounded-full bg-warning/30 px-2 py-0.5 text-[10px] hover:bg-warning/40"
-            >
-              Retry now
-            </button>
+            {!readOnly && (
+              <button
+                onClick={() => { void flushQueue(); void flushScanSubmitQueue(session); }}
+                className="rounded-full bg-warning/30 px-2 py-0.5 text-[10px] hover:bg-warning/40"
+              >
+                Retry now
+              </button>
+            )}
           </div>
         )}
         {!supabaseConfigured && (

@@ -11,6 +11,7 @@ import { feedback, isFeedbackEnabled, setFeedbackEnabled } from "@/lib/scanFeedb
 import { toast } from "sonner";
 import { useOlsSession } from "@/hooks/useOlsSession";
 import { usePendingCentralSubmitSync } from "@/hooks/usePendingCentralSubmitSync";
+import { useDeviceSurface } from "@/context/DeviceSurfaceContext";
 import {
   submitWithOfflineRetry,
 } from "@/lib/scanSubmitQueue";
@@ -32,11 +33,12 @@ export default function GateScan() {
   const [submitting, setSubmitting] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const { session, canSubmitCentral } = useOlsSession();
+  const { readOnly, fastScanLayout, can, capabilityGuidance } = useDeviceSurface();
   const inputRef = useRef<HTMLInputElement>(null);
 
   usePendingCentralSubmitSync(ctnResult?.idempotencyKey, setSubmitResult);
 
-  useEffect(() => { reload(); inputRef.current?.focus(); }, []);
+  useEffect(() => { reload(); if (!readOnly) inputRef.current?.focus(); }, [readOnly]);
   async function reload() {
     setLabels(await listTable<ShippingLabelRow>("ols_shipping_labels"));
     setCartons(await listTable<Carton>("ols_cartons"));
@@ -85,6 +87,7 @@ export default function GateScan() {
   }
 
   async function check() {
+    if (scanDisabled) return;
     try {
       setScanError(null);
       const ref = scan.trim();
@@ -142,6 +145,7 @@ export default function GateScan() {
     submitResult?.status ?? ctnResult?.centralSyncStatus ?? "preview_only";
 
   async function handleSubmitCentral() {
+    if (readOnly || !can("central_submit")) return;
     if (!ctnResult?.payload || !ctnResult.idempotencyKey) return;
     setSubmitting(true);
     const r = await submitWithOfflineRetry({
@@ -159,6 +163,7 @@ export default function GateScan() {
   }
 
   async function handleRetryCentral() {
+    if (readOnly || !can("central_submit")) return;
     if (!ctnResult?.payload || !ctnResult.idempotencyKey) return;
     setSubmitting(true);
     const r = await submitWithOfflineRetry({
@@ -175,9 +180,10 @@ export default function GateScan() {
     else toast.error(r.message);
   }
 
-  const fastScan = typeof window !== "undefined" && window.matchMedia("(max-width: 640px)").matches;
+  const fastScan = fastScanLayout;
   const showGreen = ctnResult?.ok || legacyResult?.kind === "green";
   const showRed = (ctnResult && !ctnResult.ok) || legacyResult?.kind === "red";
+  const scanDisabled = readOnly || !can("keyboard_wedge_scan");
 
   return (
     <div className={fastScan ? "ols-fast-scan" : undefined}>
@@ -187,20 +193,30 @@ export default function GateScan() {
         description="Scan CTN-SO order barcode for Central gate proof, or shipping QR for legacy dispatch clearance."
       />
 
+      {readOnly && (
+        <div className="mb-4 rounded-xl border border-secondary bg-secondary/30 px-4 py-3 text-sm text-secondary-foreground">
+          {capabilityGuidance("keyboard_wedge_scan")}
+        </div>
+      )}
+
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="ols-card p-6 lg:col-span-2">
           <div className="flex gap-2">
             <Input
               ref={inputRef} value={scan} onChange={e => setScan(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && check()}
+              onKeyDown={e => e.key === "Enter" && !scanDisabled && check()}
               placeholder="Scan CTN-SO-* or shipping QR…"
               aria-label="Gate scan barcode input"
               className="h-14 font-mono text-lg"
+              disabled={scanDisabled}
+              readOnly={scanDisabled}
             />
-            <Button onClick={check} className="h-14 px-6 bg-gradient-primary text-primary-foreground"><ScanLine size={20} /></Button>
-            <Button variant="outline" className="h-14 px-3" onClick={() => { setFeedbackEnabled(!isFeedbackEnabled()); location.reload(); }} title="Toggle scan beep + vibration">
-              {isFeedbackEnabled() ? <Volume2 size={18} /> : <VolumeX size={18} />}
-            </Button>
+            <Button onClick={check} disabled={scanDisabled} className="h-14 px-6 bg-gradient-primary text-primary-foreground"><ScanLine size={20} /></Button>
+            {!readOnly && (
+              <Button variant="outline" className="h-14 px-3" onClick={() => { setFeedbackEnabled(!isFeedbackEnabled()); location.reload(); }} title="Toggle scan beep + vibration">
+                {isFeedbackEnabled() ? <Volume2 size={18} /> : <VolumeX size={18} />}
+              </Button>
+            )}
           </div>
 
           <p className="mt-2 text-xs text-muted-foreground">
@@ -249,9 +265,15 @@ export default function GateScan() {
             readyForCentral={!!ctnResult?.readyForCentral}
             userMessage={ctnResult?.userMessage}
             syncStatus={syncStatus}
-            canSubmit={canSubmitCentral}
+            canSubmit={canSubmitCentral && can("central_submit")}
             submitDisabledReason={
-              !canSubmitCentral ? "Dispatch or security role required (JWT ols_roles)" : undefined
+              readOnly
+                ? capabilityGuidance("central_submit")
+                : !canSubmitCentral
+                  ? "Dispatch or security role required (JWT ols_roles)"
+                  : !can("central_submit")
+                    ? capabilityGuidance("central_submit")
+                    : undefined
             }
             onSubmitToCentral={handleSubmitCentral}
             onRetry={handleRetryCentral}
