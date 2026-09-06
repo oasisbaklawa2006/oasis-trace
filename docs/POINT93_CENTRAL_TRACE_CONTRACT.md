@@ -67,11 +67,22 @@ Wired into `scanService` (producer), `submitCentralScan` (consumer), and `scanSu
 | Check | Result |
 |-------|--------|
 | Trace `check-core-backend-authority.sh` vs `main` | **Pass** — no `db/*.sql`, `supabase/migrations/*`, or `supabase/functions/*` mutations in this PR |
-| Core canonical main SHA (reference) | `69ae885f0baba3a6bd6a1b2862ae5be669808eb4` (Point72 order intake closure, #226) |
-| Point72 production deployment | **Not claimed** — Core push preflight passed; protected deployment job was skipped |
+| Trace exact-head SHA | `5b262ea8f7ca4f7294605494396ec1377567c7ba` |
+| Core production anchor SHA | `69ae885f0baba3a6bd6a1b2862ae5be669808eb4` (Point72 order intake, Core #226) |
+| Core Production Migration Release | Run `34040050288` — workflow **success**; ledger/preflight **passed**; approved deployment job **skipped** |
 | Trace server proxy mutation | **Reverted** — prior edge-fn edits removed to preserve Core ownership boundary |
 
-**Core prerequisite (not Trace lane):** deploy `submit-central-scan` contract validation + `app_metadata.ols_roles`-only role gate from `oasis-supabase-core`. Trace client adapter enforces the same v1.0 envelope fail-closed before any invoke.
+### Point93 ↔ Core anchor reconciliation
+
+| Assumption | Core anchor evidence | Point93 Trace adapter |
+|------------|---------------------|----------------------|
+| Canonical order UUID for scan `order_id` | Point72 adds `resolve_order_intake_source_identity_v1` on `public.orders` (intake attribution). **Does not** populate `ols_orders_cache.external_ref` in Trace. | `resolveCentralOrderId` reads `external_ref` when present; `central_order_unbound` → `preview_only` when absent |
+| Order duplicate / intake replay | Point72 migration `20260906120000_point72_order_intake_source_attribution_closure.sql` + pgTAP contracts | Out of scope — Trace does not mint order truth |
+| `submit-central-scan` server v1 validation | **Not present** at Core anchor SHA — **not verified deployed** | Client-side only: `validateCentralSubmitEnvelope` in `centralSubmit` + `scanSubmitQueue` |
+| `app_metadata.ols_roles` role gate (server) | Not verified at Core anchor for scan submit | Client: `roles.ts` (`requireSubmitRole`) |
+| Legacy `submit-central-scan` copy in Trace repo | Frozen historical artifact | Trace invokes but does not own or mutate |
+
+**Core prerequisites still open (not Trace lane):** live `ols_orders_cache.external_ref` sync; `submit-central-scan` v1.0 server validation in Core (independently verifiable); migration + edge secrets applied.
 
 ## Contract test matrix
 
@@ -93,12 +104,19 @@ Wired into `scanService` (producer), `submitCentralScan` (consumer), and `scanSu
 
 ## Remaining physical / ops dependencies (not closed by Point 93)
 
-- Physical scanner UAT evidence (#462)
+### Software (Core/runtime — not Trace lane)
+
+- `ols_orders_cache.external_ref` live sync from Core `public.orders.id` (Point72 anchor does not provide this)
+- `submit-central-scan` v1.0 server validation in `oasis-supabase-core` — **not verified deployed** at anchor `69ae885`
 - `db/ols_central_scan_submissions.sql` applied to Supabase
 - Edge function deployed with `CENTRAL_SCAN_INGEST_URL` + signing secret
 - `VITE_CENTRAL_SCAN_SUBMIT_ENABLED=true` only after staging pilot
 - JWT `ols_roles` on all operator accounts
 - RLS hardening (`ols_enable_rls_authenticated.sql`)
+
+### Physical (separate evidence lane)
+
+- Physical scanner UAT evidence (#462)
 
 ---
 
