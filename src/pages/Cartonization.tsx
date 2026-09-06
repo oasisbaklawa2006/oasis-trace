@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { CentralPayloadPreview } from "@/components/CentralPayloadPreview";
 import { listTable, insertRow } from "@/lib/data";
 import { num } from "@/lib/numbering";
+import { validateBarcodeIdentity } from "@/lib/barcodeIdentity";
 import { buildCartonMetadata, resolveCartonBarcodeDisplay } from "@/lib/barcodeCarton";
 import { supportsCentralBarcode } from "@/lib/scanContract";
 import { processCartonIdentityScan, type ScanFlowResult } from "@/lib/scanService";
@@ -69,7 +70,7 @@ export default function Cartonization() {
       setCartonError(null);
       if (!orderRef) { toast.error("Pick an order first"); return; }
       const order = orders.find(o => o.order_number === orderRef);
-      // carton_no is randomly generated (numbering.ts) and can collide under
+      // carton_no is Trace-allocated (barcodeIdentity.ts) and can collide under
       // concurrent multi-terminal use — retry with a fresh id (and matching
       // metadata) on a confirmed unique-constraint violation, bounded.
       const c = await insertWithUniqueRetry<Carton>("ols_cartons", () => {
@@ -132,7 +133,13 @@ export default function Cartonization() {
       setCartonError(null);
       const code = scanInput.trim();
       if (!code || !carton) return;
-      const lbl = labels.find(l => l.label_no === code);
+      const plCheck = validateBarcodeIdentity(code, { expectedKind: "production_label" });
+      if (plCheck.ok === false) {
+        feedback("error");
+        toast.error("Invalid production label barcode", { description: plCheck.message });
+        return;
+      }
+      const lbl = labels.find(l => l.label_no === plCheck.normalized);
       if (!lbl) { feedback("error"); toast.error("Label not found", { description: "Use manual add if needed." }); return; }
       if (packed.has(lbl.id)) { feedback("dup"); toast.error("Duplicate scan blocked", { description: "Label already in another active carton." }); return; }
       const row = await insertRow<CartonContent>("ols_carton_contents", { carton_id: carton.id, production_label_id: lbl.id });

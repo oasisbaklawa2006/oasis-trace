@@ -3,6 +3,7 @@
  * idempotency guard, local scan history, ready_to_submit status.
  */
 import { listTable, insertRow } from "@/lib/data";
+import { validateBarcodeIdentity } from "@/lib/barcodeIdentity";
 import {
   buildCartonIdentityScanPayload,
   buildDispatchGateScanPayload,
@@ -145,6 +146,16 @@ export async function processDispatchGateCtnSoScan(
   orders: OrderRef[],
   resolutionCtx?: GateResolutionContext,
 ): Promise<ScanFlowResult> {
+  const identityCheck = validateBarcodeIdentity(scannedBarcode, { expectedKind: "central_carton" });
+  if (!identityCheck.ok) {
+    return {
+      ok: false,
+      userMessage: getScanUserMessage("barcode_format_invalid"),
+      messageCode: "barcode_format_invalid",
+      readyForCentral: false,
+    };
+  }
+
   const parsed = parseCartonOrderBarcode(scannedBarcode);
   if (!parsed.valid || !parsed.orderNumber) {
     return {
@@ -243,6 +254,16 @@ export async function processCartonIdentityScan(
   activeOrderRef: string,
   orders: OrderRef[],
 ): Promise<ScanFlowResult> {
+  const identityCheck = validateBarcodeIdentity(scannedBarcode, { expectedKind: "central_carton" });
+  if (!identityCheck.ok) {
+    return {
+      ok: false,
+      userMessage: getScanUserMessage("barcode_format_invalid"),
+      messageCode: "barcode_format_invalid",
+      readyForCentral: false,
+    };
+  }
+
   const parsed = parseCartonOrderBarcode(scannedBarcode);
   if (!parsed.valid || !parsed.orderNumber) {
     return {

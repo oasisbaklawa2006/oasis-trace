@@ -1,5 +1,5 @@
-// Bounded retry for inserts whose row includes a randomly-generated
-// human-readable identifier (src/lib/numbering.ts) that can collide under
+// Bounded retry for inserts whose row includes a Trace-allocated
+// human-readable identifier (src/lib/barcodeIdentity.ts) that can collide under
 // concurrent multi-terminal use. On a confirmed unique-constraint violation
 // (23505) the row is rebuilt — including a freshly generated identifier —
 // and the insert retried, up to a hard attempt cap. Any other error, or
