@@ -49,6 +49,7 @@ const PERMANENT_FAILURE_REASONS = new Set([
   "forbidden",
   "not_verified",
   "invalid_request",
+  "invalid_contract",
   "submit_disabled",
 ]);
 

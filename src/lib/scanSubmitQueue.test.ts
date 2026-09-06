@@ -53,6 +53,7 @@ describe("isPermanentSubmitFailure", () => {
     expect(isPermanentSubmitFailure("forbidden")).toBe(true);
     expect(isPermanentSubmitFailure("not_verified")).toBe(true);
     expect(isPermanentSubmitFailure("unauthenticated")).toBe(true);
+    expect(isPermanentSubmitFailure("invalid_contract")).toBe(true);
   });
 
   it("does not classify network errors as permanent", () => {
@@ -178,6 +179,35 @@ describe("scanSubmitQueue", () => {
     submitMock.mockClear();
     const flush2 = await flushScanSubmitQueue(session);
     expect(flush2.skipped).toBe(0);
+    expect(flush2.permanent).toBe(1);
+    expect(submitMock).not.toHaveBeenCalled();
+  });
+
+  it("invalid_contract rejection is permanent and not silently retried", async () => {
+    enqueuePendingScan({
+      idempotencyKey: "k-contract",
+      payload: dispatchPayload,
+      session,
+    });
+
+    submitMock.mockResolvedValueOnce({
+      ok: false,
+      status: "failed",
+      message: "Idempotency key does not match payload identity",
+      failureReason: "invalid_contract",
+    });
+
+    const flush1 = await flushScanSubmitQueue(session);
+    expect(flush1.permanent).toBe(1);
+    expect(getRetryableQueueSize()).toBe(0);
+
+    const failures = getPermanentFailures();
+    expect(failures).toHaveLength(1);
+    expect(failures[0].failureReason).toBe("invalid_contract");
+    expect(failures[0].permanentFailure).toBe(true);
+
+    submitMock.mockClear();
+    const flush2 = await flushScanSubmitQueue(session);
     expect(flush2.permanent).toBe(1);
     expect(submitMock).not.toHaveBeenCalled();
   });

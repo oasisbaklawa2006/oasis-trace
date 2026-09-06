@@ -14,7 +14,7 @@ vi.mock("@/lib/data", () => ({
 
 const dispatchPayload = {
   source_app: "barcode_app",
-  order_id: "order-1",
+  order_id: "550e8400-e29b-41d4-a716-446655440001",
   order_number: "SO-2026-0001",
   scan_type: "dispatch_gate",
   verification_type: "gate_check",
@@ -61,7 +61,7 @@ describe("submitCentralScan", () => {
 
   it("blocks non-verified payload", async () => {
     const r = await submitCentralScan({
-      idempotencyKey: "k3",
+      idempotencyKey: "barcode_app|dispatch_gate|CTN-SO-2026-0001|550e8400-e29b-41d4-a716-446655440001",
       payload: { ...dispatchPayload, verification_status: "mismatch" },
       session,
     });
@@ -69,9 +69,30 @@ describe("submitCentralScan", () => {
     expect(r.failureReason).toBe("not_verified");
   });
 
+  it("blocks invalid contract envelope (idempotency mismatch)", async () => {
+    const r = await submitCentralScan({
+      idempotencyKey: "wrong-key",
+      payload: dispatchPayload,
+      session,
+    });
+    expect(r.ok).toBe(false);
+    expect(r.failureReason).toBe("invalid_contract");
+  });
+
+  it("blocks malformed payload missing order_id", async () => {
+    const { order_id: _, ...bad } = dispatchPayload;
+    const r = await submitCentralScan({
+      idempotencyKey: "k-malformed",
+      payload: bad,
+      session,
+    });
+    expect(r.ok).toBe(false);
+    expect(r.failureReason).toBe("invalid_contract");
+  });
+
   it("submits successfully in mock mode", async () => {
     const r = await submitCentralScan({
-      idempotencyKey: "k4",
+      idempotencyKey: "barcode_app|dispatch_gate|CTN-SO-2026-0001|550e8400-e29b-41d4-a716-446655440001",
       payload: dispatchPayload,
       session,
       scanHistoryId: "hist-1",
@@ -82,21 +103,35 @@ describe("submitCentralScan", () => {
   });
 
   it("blocks duplicate submit", async () => {
-    await submitCentralScan({ idempotencyKey: "k5", payload: dispatchPayload, session });
-    const dup = await submitCentralScan({ idempotencyKey: "k5", payload: dispatchPayload, session });
+    const key = "barcode_app|dispatch_gate|CTN-SO-2026-0001|550e8400-e29b-41d4-a716-446655440001";
+    await submitCentralScan({ idempotencyKey: key, payload: dispatchPayload, session });
+    const dup = await submitCentralScan({ idempotencyKey: key, payload: dispatchPayload, session });
+    expect(dup.duplicate).toBe(true);
+    expect(dup.message).toBe("Scan already recorded");
+  });
+
+  it("blocks padded idempotency key duplicate in mock mode", async () => {
+    const key = "barcode_app|dispatch_gate|CTN-SO-2026-0001|550e8400-e29b-41d4-a716-446655440001";
+    await submitCentralScan({ idempotencyKey: key, payload: dispatchPayload, session });
+    const dup = await submitCentralScan({
+      idempotencyKey: `  ${key}  `,
+      payload: dispatchPayload,
+      session,
+    });
     expect(dup.duplicate).toBe(true);
     expect(dup.message).toBe("Scan already recorded");
   });
 
   it("retry after mock failure path uses same key", async () => {
+    const key = "barcode_app|dispatch_gate|CTN-SO-2026-0001|550e8400-e29b-41d4-a716-446655440001";
     const first = await submitCentralScan({
-      idempotencyKey: "k6",
+      idempotencyKey: key,
       payload: dispatchPayload,
       session,
     });
     expect(first.ok).toBe(true);
     const retry = await retryCentralScan({
-      idempotencyKey: "k6",
+      idempotencyKey: key,
       payload: dispatchPayload,
       session,
     });
