@@ -6,6 +6,10 @@ import {
   validateIdempotencyKeyConsistency,
   validateCentralSubmitEnvelope,
   isPermanentContractFailure,
+  resolveCentralOrderId,
+  finalizeCentralScanHandoff,
+  isPermanentSubmitFailureReason,
+  stampContractVersion,
 } from "./centralTraceContract";
 import {
   buildDispatchGateScanPayload,
@@ -227,5 +231,54 @@ describe("isPermanentContractFailure", () => {
     expect(isPermanentContractFailure("invalid_contract")).toBe(true);
     expect(isPermanentContractFailure("idempotency_mismatch")).toBe(true);
     expect(isPermanentContractFailure("unknown_scan_type")).toBe(true);
+  });
+});
+
+describe("resolveCentralOrderId", () => {
+  it("returns external_ref when it is a valid Central UUID", () => {
+    const id = "550e8400-e29b-41d4-a716-446655440000";
+    expect(resolveCentralOrderId({ id: "local", order_number: "SO-2026-0001", external_ref: id })).toBe(id);
+  });
+
+  it("returns null when external_ref is missing or not a UUID", () => {
+    expect(resolveCentralOrderId({ id: "local", order_number: "SO-2026-0001" })).toBeNull();
+    expect(resolveCentralOrderId({ id: "local", order_number: "SO-2026-0001", external_ref: "not-uuid" })).toBeNull();
+  });
+});
+
+describe("finalizeCentralScanHandoff", () => {
+  it("stamps contract_version and validates producer envelope", () => {
+    const payload = buildDispatchGateScanPayload({
+      order_id: ORDER_ID,
+      order_number: "SO-2026-0001",
+      barcode_value: "CTN-SO-2026-0001",
+      expected_barcode: "CTN-SO-2026-0001",
+    });
+    const key = scanIdempotencyKey("dispatch_gate", payload.barcode_value, payload.order_id);
+    const r = finalizeCentralScanHandoff(key, payload);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.payload.contract_version).toBe("1.0");
+    }
+  });
+});
+
+describe("isPermanentSubmitFailureReason", () => {
+  it("includes invalid_contract in permanent set", () => {
+    expect(isPermanentSubmitFailureReason("invalid_contract")).toBe(true);
+    expect(isPermanentSubmitFailureReason("network_error")).toBe(false);
+  });
+});
+
+describe("stampContractVersion", () => {
+  it("adds literal contract version to payload", () => {
+    const payload = buildDispatchGateScanPayload({
+      order_id: ORDER_ID,
+      order_number: "SO-2026-0001",
+      barcode_value: "CTN-SO-2026-0001",
+      expected_barcode: "CTN-SO-2026-0001",
+    });
+    const stamped = stampContractVersion(payload);
+    expect(stamped.contract_version).toBe(CENTRAL_TRACE_CONTRACT_VERSION);
   });
 });

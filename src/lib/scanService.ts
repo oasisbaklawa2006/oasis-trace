@@ -15,11 +15,14 @@ import {
   type CentralDispatchGateScanPayload,
   type ScanMessageCode,
 } from "@/lib/scanContract";
+import {
+  finalizeCentralScanHandoff,
+  resolveCentralOrderId,
+  stampContractVersion,
+  type CentralOrderRef,
+} from "@/lib/centralTraceContract";
 
-export interface OrderRef {
-  id: string;
-  order_number: string;
-}
+export type OrderRef = CentralOrderRef;
 
 // ---------- Legacy (shipping-QR) gate decision ----------
 // Pure green/red decision logic for the legacy gate flow, extracted from
@@ -183,7 +186,40 @@ export async function processDispatchGateCtnSoScan(
     };
   }
 
-  const idempotencyKey = scanIdempotencyKey("dispatch_gate", match.scanned, order.id);
+  const centralOrderId = resolveCentralOrderId(order);
+  if (!centralOrderId) {
+    const payload = stampContractVersion(
+      buildDispatchGateScanPayload({
+        order_id: order.id,
+        order_number: order.order_number,
+        barcode_value: match.scanned,
+        expected_barcode: match.expected,
+        verification_status: "verified",
+      }),
+    );
+    const scanHistoryId = await recordCentralScanEvent({
+      scan_value: match.scanned,
+      scan_context: "gate_ctn_so",
+      result: "green",
+      idempotencyKey: scanIdempotencyKey("dispatch_gate", match.scanned, order.id),
+      payload,
+      messageCode: "central_order_unbound",
+      userMessage: getScanUserMessage("central_order_unbound"),
+      syncStatus: "preview_only",
+    });
+    return {
+      ok: true,
+      userMessage: getScanUserMessage("central_order_unbound"),
+      messageCode: "central_order_unbound",
+      scanHistoryId,
+      payload,
+      readyForCentral: false,
+      centralSyncStatus: "preview_only",
+      recorded: true,
+    };
+  }
+
+  const idempotencyKey = scanIdempotencyKey("dispatch_gate", match.scanned, centralOrderId);
   if (await hasIdempotentScan(idempotencyKey)) {
     return {
       ok: false,
@@ -196,19 +232,31 @@ export async function processDispatchGateCtnSoScan(
   }
 
   const payload = buildDispatchGateScanPayload({
-    order_id: order.id,
+    order_id: centralOrderId,
     order_number: order.order_number,
     barcode_value: match.scanned,
     expected_barcode: match.expected,
     verification_status: "verified",
   });
 
+  const handoff = finalizeCentralScanHandoff(idempotencyKey, payload);
+  if (handoff.ok === false) {
+    return {
+      ok: false,
+      userMessage: handoff.message,
+      messageCode: "barcode_format_invalid",
+      readyForCentral: false,
+    };
+  }
+
+  const stampedPayload = handoff.payload;
+
   const scanHistoryId = await recordCentralScanEvent({
     scan_value: match.scanned,
     scan_context: "gate_ctn_so",
     result: "green",
     idempotencyKey,
-    payload,
+    payload: stampedPayload,
     messageCode: "gate_scan_verified",
     userMessage: getScanUserMessage("gate_scan_verified"),
     syncStatus: "ready_to_submit",
@@ -231,7 +279,7 @@ export async function processDispatchGateCtnSoScan(
     messageCode: "gate_scan_verified",
     idempotencyKey,
     scanHistoryId,
-    payload,
+    payload: stampedPayload,
     readyForCentral: true,
     centralSyncStatus: "ready_to_submit",
     recorded: true,
@@ -298,7 +346,40 @@ export async function processCartonIdentityScan(
     };
   }
 
-  const idempotencyKey = scanIdempotencyKey("carton", match.scanned, order.id);
+  const centralOrderId = resolveCentralOrderId(order);
+  if (!centralOrderId) {
+    const payload = stampContractVersion(
+      buildCartonIdentityScanPayload({
+        order_id: order.id,
+        order_number: order.order_number,
+        barcode_value: match.scanned,
+        expected_barcode: match.expected,
+        verification_status: "verified",
+      }),
+    );
+    const scanHistoryId = await recordCentralScanEvent({
+      scan_value: match.scanned,
+      scan_context: "carton_identity",
+      result: "green",
+      idempotencyKey: scanIdempotencyKey("carton", match.scanned, order.id),
+      payload,
+      messageCode: "central_order_unbound",
+      userMessage: getScanUserMessage("central_order_unbound"),
+      syncStatus: "preview_only",
+    });
+    return {
+      ok: true,
+      userMessage: getScanUserMessage("central_order_unbound"),
+      messageCode: "central_order_unbound",
+      scanHistoryId,
+      payload,
+      readyForCentral: false,
+      centralSyncStatus: "preview_only",
+      recorded: true,
+    };
+  }
+
+  const idempotencyKey = scanIdempotencyKey("carton", match.scanned, centralOrderId);
   if (await hasIdempotentScan(idempotencyKey)) {
     return {
       ok: false,
@@ -311,19 +392,31 @@ export async function processCartonIdentityScan(
   }
 
   const payload = buildCartonIdentityScanPayload({
-    order_id: order.id,
+    order_id: centralOrderId,
     order_number: order.order_number,
     barcode_value: match.scanned,
     expected_barcode: match.expected,
     verification_status: "verified",
   });
 
+  const handoff = finalizeCentralScanHandoff(idempotencyKey, payload);
+  if (handoff.ok === false) {
+    return {
+      ok: false,
+      userMessage: handoff.message,
+      messageCode: "barcode_format_invalid",
+      readyForCentral: false,
+    };
+  }
+
+  const stampedPayload = handoff.payload;
+
   const scanHistoryId = await recordCentralScanEvent({
     scan_value: match.scanned,
     scan_context: "carton_identity",
     result: "green",
     idempotencyKey,
-    payload,
+    payload: stampedPayload,
     messageCode: "carton_identity_verified",
     userMessage: getScanUserMessage("carton_identity_verified"),
     syncStatus: "ready_to_submit",
@@ -335,7 +428,7 @@ export async function processCartonIdentityScan(
     messageCode: "carton_identity_verified",
     idempotencyKey,
     scanHistoryId,
-    payload,
+    payload: stampedPayload,
     readyForCentral: true,
     centralSyncStatus: "ready_to_submit",
     recorded: true,

@@ -3,7 +3,8 @@
 **ASM:** Central #459 defines Point 93 = Central–Trace software contract.  
 **Repo:** `oasisbaklawa2006/oasis-trace` (Trace authority)  
 **Contract version:** `1.0` (`CENTRAL_TRACE_CONTRACT_VERSION`)  
-**Date:** 2026-09-05  
+**Date:** 2026-09-06  
+**Trace main SHA (baseline):** `a5c347311325607a0a82b1ffe6f76ffd0b44ce1f`  
 **Physical scanner UAT:** Separate (#462 / original Point96 offline retry lane)
 
 ---
@@ -46,16 +47,18 @@ Programmatic export: `CENTRAL_TRACE_PRODUCER_CONSUMER_MATRIX` in `src/lib/centra
 
 | Function | Purpose |
 |----------|---------|
+| `resolveCentralOrderId` | Map `ols_orders_cache.external_ref` → canonical Central UUID; null when unbound |
+| `stampContractVersion` | Emit `contract_version: "1.0"` on producer payloads |
+| `finalizeCentralScanHandoff` | Producer fail-closed: stamp + validate envelope before `ready_to_submit` |
 | `validateCentralScanPayload` | Zod fail-closed v1.0 shape check (`.strict()`; unknown top-level fields rejected) |
 | `validateIdempotencyKeyConsistency` | Key must match payload identity |
 | `validateCentralSubmitEnvelope` | Full pre-submit gate in `centralSubmit` |
 | `isPermanentContractFailure` | Contract rejections are non-retryable |
+| `isPermanentSubmitFailureReason` | Shared permanent failure set for submit + offline queue |
 
-**v1.0 payload rules:** Both `dispatch_gate` and `carton` schemas use Zod `.strict()`. The only optional extension field is `contract_version` with literal value `"1.0"`. Any other unrecognized top-level field fails closed as `invalid_contract`.
+**v1.0 identity binding:** `scanService` uses `external_ref` (not local cache `id`) for `order_id` and idempotency keys. Orders without a valid Central UUID binding return `central_order_unbound` with `preview_only` sync — local audit only, no Central handoff.
 
-**Idempotency key normalization:** `submitCentralScan` trims the accepted key once and uses that normalized value for validation, duplicate lookup (`hasCentralSubmission`), mock storage, and edge-function transport — padded and unpadded keys share the same submission identity.
-
-Wired into `submitCentralScan` before network/mock submit. `invalid_contract` added to permanent failure set in `scanSubmitQueue`.
+Wired into `scanService` (producer), `submitCentralScan` (consumer), `scanSubmitQueue` (pre-enqueue validation), and `submit-central-scan` edge function (server proxy).
 
 ---
 
@@ -71,6 +74,8 @@ Wired into `submitCentralScan` before network/mock submit. `invalid_contract` ad
 | Unknown version / shape | `centralTraceContract.test.ts` |
 | Unrecognized strict-schema field | `centralTraceContract.test.ts` |
 | Padded idempotency key duplicate | `centralSubmit.test.ts` |
+| Producer (`scanService`) + `external_ref` binding | `scanService.test.ts`, `centralTraceContract.test.ts` |
+| Offline enqueue contract gate | `scanSubmitQueue.test.ts` |
 | Central authority reject (mock) | `centralSubmit.test.ts`, `scanSubmitQueue.test.ts` |
 
 ---

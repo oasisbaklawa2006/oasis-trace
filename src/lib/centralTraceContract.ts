@@ -330,3 +330,58 @@ export function isPermanentContractFailure(code: ContractRejectionCode): boolean
     "unsupported_shape",
   ].includes(code);
 }
+
+const CENTRAL_ORDER_ID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** Order reference with optional Core/Central canonical UUID binding. */
+export interface CentralOrderRef {
+  id: string;
+  order_number: string;
+  external_ref?: string;
+}
+
+/**
+ * Resolve canonical Central order UUID from cache row.
+ * Trace must not mint order truth — returns null when external_ref is absent or invalid.
+ */
+export function resolveCentralOrderId(order: CentralOrderRef): string | null {
+  const ref = order.external_ref?.trim();
+  if (!ref || !CENTRAL_ORDER_ID_RE.test(ref)) return null;
+  return ref;
+}
+
+/** Stamp v1.0 contract version on a producer payload before Central handoff. */
+export function stampContractVersion<T extends CentralScanPayloadV1>(payload: T): T {
+  return { ...payload, contract_version: CENTRAL_TRACE_CONTRACT_VERSION };
+}
+
+/**
+ * Producer-side fail-closed gate: stamp version + validate envelope before handoff.
+ */
+export function finalizeCentralScanHandoff(
+  idempotencyKey: string,
+  payload: CentralScanPayloadV1,
+): ContractValidationResult<CentralScanPayloadV1> {
+  return validateCentralSubmitEnvelope(idempotencyKey, stampContractVersion(payload));
+}
+
+/** Map submit failureReason strings to permanent (non-retry) classification. */
+export function isPermanentSubmitFailureReason(reason?: string): boolean {
+  if (!reason) return false;
+  const normalized = reason.toLowerCase();
+  if (normalized === "invalid_contract") return true;
+  if (PERMANENT_SUBMIT_FAILURE_REASONS.has(normalized)) return true;
+  if (normalized.includes("forbidden") || normalized.includes("not_verified")) return true;
+  return false;
+}
+
+/** Shared permanent failure reasons for submit + offline retry lanes. */
+export const PERMANENT_SUBMIT_FAILURE_REASONS = new Set([
+  "unauthenticated",
+  "forbidden",
+  "not_verified",
+  "invalid_request",
+  "invalid_contract",
+  "submit_disabled",
+]);

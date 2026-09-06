@@ -5,9 +5,12 @@ import {
   hasIdempotentScan,
 } from "./scanService";
 
+const CENTRAL_ORDER_1 = "550e8400-e29b-41d4-a716-446655440001";
+const CENTRAL_ORDER_2 = "550e8400-e29b-41d4-a716-446655440002";
+
 const orders = [
-  { id: "order-uuid-1", order_number: "SO-2026-0001" },
-  { id: "order-uuid-2", order_number: "SO-2026-0002" },
+  { id: "order-uuid-1", order_number: "SO-2026-0001", external_ref: CENTRAL_ORDER_1 },
+  { id: "order-uuid-2", order_number: "SO-2026-0002", external_ref: CENTRAL_ORDER_2 },
 ];
 
 const mockState = { scanHistory: [] as Record<string, unknown>[], gateScans: [] as Record<string, unknown>[] };
@@ -46,6 +49,9 @@ describe("processDispatchGateCtnSoScan", () => {
     expect(r.payload?.scan_type).toBe("dispatch_gate");
     expect(r.readyForCentral).toBe(true);
     expect(r.idempotencyKey).toContain("dispatch_gate");
+    expect(r.idempotencyKey).toContain(CENTRAL_ORDER_1);
+    expect(r.payload?.contract_version).toBe("1.0");
+    expect(r.payload?.order_id).toBe(CENTRAL_ORDER_1);
   });
 
   it("returns order not found for unknown SO", async () => {
@@ -58,6 +64,15 @@ describe("processDispatchGateCtnSoScan", () => {
     const r = await processDispatchGateCtnSoScan("PL-20260101-0001", orders);
     expect(r.ok).toBe(false);
     expect(r.userMessage).toBe("Barcode format invalid");
+  });
+
+  it("returns preview_only when order lacks Central external_ref binding", async () => {
+    const unbound = [{ id: "local-only", order_number: "SO-2026-0003" }];
+    const r = await processDispatchGateCtnSoScan("CTN-SO-2026-0003", unbound);
+    expect(r.ok).toBe(true);
+    expect(r.readyForCentral).toBe(false);
+    expect(r.messageCode).toBe("central_order_unbound");
+    expect(r.centralSyncStatus).toBe("preview_only");
   });
 
   it("blocks duplicate idempotency", async () => {
@@ -141,7 +156,7 @@ describe("hasIdempotentScan", () => {
 
   it("detects existing keys after insert", async () => {
     await processDispatchGateCtnSoScan("CTN-SO-2026-0002", orders);
-    const key = "barcode_app|dispatch_gate|CTN-SO-2026-0002|order-uuid-2";
+    const key = `barcode_app|dispatch_gate|CTN-SO-2026-0002|${CENTRAL_ORDER_2}`;
     expect(await hasIdempotentScan(key)).toBe(true);
   });
 });

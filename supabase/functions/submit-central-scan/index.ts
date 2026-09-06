@@ -52,10 +52,7 @@ Deno.serve(async (req) => {
       return json({ ok: false, error: "unauthenticated", message: "Invalid session" }, 401);
     }
 
-    const roles: string[] =
-      userData.user.app_metadata?.ols_roles ??
-      userData.user.user_metadata?.ols_roles ??
-      [];
+    const roles: string[] = userData.user.app_metadata?.ols_roles ?? [];
     if (!roles.some(r => SUBMIT_ROLES.includes(r))) {
       return json({
         ok: false,
@@ -71,6 +68,16 @@ Deno.serve(async (req) => {
 
     if (!idempotency_key || !payload) {
       return json({ ok: false, error: "invalid_request", message: "idempotency_key and payload required" }, 400);
+    }
+
+    const contractError = validateCentralScanEnvelope(idempotency_key, payload);
+    if (contractError) {
+      return json({
+        ok: false,
+        error: "invalid_contract",
+        message: contractError,
+        failure_reason: "invalid_contract",
+      }, 400);
     }
 
     if (payload.verification_status && payload.verification_status !== "verified") {
@@ -228,6 +235,69 @@ Deno.serve(async (req) => {
     }, 500);
   }
 });
+
+const CONTRACT_VERSION = "1.0";
+const SOURCE_APP = "barcode_app";
+const ORDER_NUMBER_RE = /^SO-\d{4}-\d{4,6}$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function validateCentralScanEnvelope(idempotencyKey: string, payload: Record<string, unknown>): string | null {
+  if (payload.contract_version !== undefined && payload.contract_version !== CONTRACT_VERSION) {
+    return `Unsupported payload contract_version: ${String(payload.contract_version)}`;
+  }
+
+  const scanType = payload.scan_type;
+  if (scanType !== "dispatch_gate" && scanType !== "carton") {
+    return `Unknown scan_type: ${String(scanType)}`;
+  }
+
+  if (payload.source_app !== SOURCE_APP) {
+    return "Invalid source_app";
+  }
+
+  if (typeof payload.barcode_value !== "string" || !payload.barcode_value.trim()) {
+    return "barcode_value must not be empty";
+  }
+
+  if (scanType === "dispatch_gate") {
+    if (typeof payload.order_id !== "string" || !UUID_RE.test(payload.order_id)) {
+      return "dispatch_gate payload requires order_id UUID";
+    }
+    if (typeof payload.order_number !== "string" || !ORDER_NUMBER_RE.test(payload.order_number)) {
+      return "order_number must match SO-YYYY-####";
+    }
+    if (payload.verification_type !== "gate_check" || payload.entity_type !== "order") {
+      return "Invalid dispatch_gate verification fields";
+    }
+  }
+
+  if (scanType === "carton") {
+    if (payload.verification_type !== "identity_match" || payload.entity_type !== "order") {
+      return "Invalid carton verification fields";
+    }
+  }
+
+  const expectedKey = buildIdempotencyKey(
+    scanType as "dispatch_gate" | "carton",
+    String(payload.barcode_value),
+    typeof payload.order_id === "string" ? payload.order_id : undefined,
+  );
+  if (idempotencyKey !== expectedKey) {
+    return "Idempotency key does not match payload identity";
+  }
+
+  return null;
+}
+
+function buildIdempotencyKey(
+  scanType: "dispatch_gate" | "carton",
+  barcodeValue: string,
+  orderId?: string,
+): string {
+  const parts = [SOURCE_APP, scanType, barcodeValue.trim().toUpperCase()];
+  if (orderId) parts.push(orderId);
+  return parts.join("|");
+}
 
 async function patchScanHistory(
   admin: ReturnType<typeof createClient>,
