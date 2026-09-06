@@ -67,9 +67,10 @@ Wired into `scanService` (producer), `submitCentralScan` (consumer), and `scanSu
 | Check | Result |
 |-------|--------|
 | Trace `check-core-backend-authority.sh` vs `main` | **Pass** — no `db/*.sql`, `supabase/migrations/*`, or `supabase/functions/*` mutations in this PR |
-| Trace exact-head SHA | `5b262ea8f7ca4f7294605494396ec1377567c7ba` |
+| Trace exact-head SHA | `b202315084d4d688700085e3be020792d4757ee6` |
 | Core production anchor SHA | `69ae885f0baba3a6bd6a1b2862ae5be669808eb4` (Point72 order intake, Core #226) |
-| Core Production Migration Release | Run `34040050288` — workflow **success**; ledger/preflight **passed**; approved deployment job **skipped** |
+| Core Production Migration Release | Run `34050874074` — workflow **success**; ledger/preflight **passed**; approved deployment **passed** (artifacts: `production-migration-deployment-69ae885…`, `production-migration-preflight-69ae885…`) |
+| Prior release run (superseded) | Run `34040050288` — deployment job skipped |
 | Trace server proxy mutation | **Reverted** — prior edge-fn edits removed to preserve Core ownership boundary |
 
 ### Point93 ↔ Core anchor reconciliation
@@ -77,12 +78,12 @@ Wired into `scanService` (producer), `submitCentralScan` (consumer), and `scanSu
 | Assumption | Core anchor evidence | Point93 Trace adapter |
 |------------|---------------------|----------------------|
 | Canonical order UUID for scan `order_id` | Point72 adds `resolve_order_intake_source_identity_v1` on `public.orders` (intake attribution). **Does not** populate `ols_orders_cache.external_ref` in Trace. | `resolveCentralOrderId` reads `external_ref` when present; `central_order_unbound` → `preview_only` when absent |
-| Order duplicate / intake replay | Point72 migration `20260906120000_point72_order_intake_source_attribution_closure.sql` + pgTAP contracts | Out of scope — Trace does not mint order truth |
-| `submit-central-scan` server v1 validation | **Not present** at Core anchor SHA — **not verified deployed** | Client-side only: `validateCentralSubmitEnvelope` in `centralSubmit` + `scanSubmitQueue` |
+| Order duplicate / intake replay | Point72 migration **deployed** to production via run `34050874074` (`20260906120000_point72_order_intake_source_attribution_closure.sql` + pgTAP) | Out of scope — Trace does not mint order truth |
+| `submit-central-scan` server v1 validation | **Not present** at Core anchor SHA — **not verified deployed** (no `submit-central-scan` path in Core repo) | Client-side only: `validateCentralSubmitEnvelope` in `centralSubmit` + `scanSubmitQueue` |
 | `app_metadata.ols_roles` role gate (server) | Not verified at Core anchor for scan submit | Client: `roles.ts` (`requireSubmitRole`) |
 | Legacy `submit-central-scan` copy in Trace repo | Frozen historical artifact | Trace invokes but does not own or mutate |
 
-**Core prerequisites still open (not Trace lane):** live `ols_orders_cache.external_ref` sync; `submit-central-scan` v1.0 server validation in Core (independently verifiable); migration + edge secrets applied.
+**Core prerequisites still open (not Trace lane):** live `ols_orders_cache.external_ref` sync from Core `public.orders.id`; `submit-central-scan` v1.0 server validation in Core (independently verifiable); Trace `ols_central_scan_submissions` migration + edge secrets applied.
 
 ## Contract test matrix
 
@@ -106,9 +107,9 @@ Wired into `scanService` (producer), `submitCentralScan` (consumer), and `scanSu
 
 ### Software (Core/runtime — not Trace lane)
 
-- `ols_orders_cache.external_ref` live sync from Core `public.orders.id` (Point72 anchor does not provide this)
+- `ols_orders_cache.external_ref` live sync from Core `public.orders.id` (Point72 deployed intake attribution on Core; Trace cache sync still separate)
 - `submit-central-scan` v1.0 server validation in `oasis-supabase-core` — **not verified deployed** at anchor `69ae885`
-- `db/ols_central_scan_submissions.sql` applied to Supabase
+- Trace `ols_central_scan_submissions` migration applied to Supabase
 - Edge function deployed with `CENTRAL_SCAN_INGEST_URL` + signing secret
 - `VITE_CENTRAL_SCAN_SUBMIT_ENABLED=true` only after staging pilot
 - JWT `ols_roles` on all operator accounts
