@@ -75,6 +75,19 @@ describe("processDispatchGateCtnSoScan", () => {
     expect(r.centralSyncStatus).toBe("preview_only");
   });
 
+  it("deduplicates repeated unbound dispatch preview scans", async () => {
+    const unbound = [{ id: "local-only", order_number: "SO-2026-0003" }];
+    const first = await processDispatchGateCtnSoScan("CTN-SO-2026-0003", unbound);
+    expect(first.ok).toBe(true);
+    expect(mockState.scanHistory).toHaveLength(1);
+
+    const duplicate = await processDispatchGateCtnSoScan("CTN-SO-2026-0003", unbound);
+    expect(duplicate.ok).toBe(false);
+    expect(duplicate.duplicate).toBe(true);
+    expect(duplicate.messageCode).toBe("scan_already_recorded");
+    expect(mockState.scanHistory).toHaveLength(1);
+  });
+
   it("blocks duplicate idempotency", async () => {
     const first = await processDispatchGateCtnSoScan("CTN-SO-2026-0001", orders);
     expect(first.ok).toBe(true);
@@ -146,6 +159,28 @@ describe("processCartonIdentityScan", () => {
     const dup = await processCartonIdentityScan("CTN-SO-2026-0001", "SO-2026-0001", orders);
     expect(dup.duplicate).toBe(true);
     expect(dup.userMessage).toBe("Scan already recorded");
+  });
+
+  it("deduplicates repeated unbound carton preview scans", async () => {
+    const unbound = [{ id: "local-only", order_number: "SO-2026-0003" }];
+    const first = await processCartonIdentityScan(
+      "CTN-SO-2026-0003",
+      "SO-2026-0003",
+      unbound,
+    );
+    expect(first.ok).toBe(true);
+    expect(first.centralSyncStatus).toBe("preview_only");
+    expect(mockState.scanHistory).toHaveLength(1);
+
+    const duplicate = await processCartonIdentityScan(
+      "CTN-SO-2026-0003",
+      "SO-2026-0003",
+      unbound,
+    );
+    expect(duplicate.ok).toBe(false);
+    expect(duplicate.duplicate).toBe(true);
+    expect(duplicate.messageCode).toBe("scan_already_recorded");
+    expect(mockState.scanHistory).toHaveLength(1);
   });
 });
 
