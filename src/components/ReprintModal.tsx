@@ -31,7 +31,7 @@ interface Props {
   refId: string;
   refLabel: string;
   /** Called only when reprint is approved (immediate or supervisor override). */
-  onConfirmed?: (info: { reason: string; approver?: string; watermark: string }) => void;
+  onConfirmed?: (info: { reason: string; approver?: string; watermark: string; reprintCount: number }) => void;
 }
 
 /**
@@ -83,14 +83,9 @@ export function ReprintModal({ open, onOpenChange, refType, refId, refLabel, onC
         status: "approved",
       });
 
-      await insertRow("ols_print_logs", {
-        ref_type: refType, ref_id: refId,
-        success: true, is_reprint: true, reprint_count: priorCount + 1,
-        reason: finalReason,
-      });
+      // Print log + command generation deferred to governed print in onConfirmed
+      // so identity/template verification runs at command time, not silently here.
 
-      // audit() never throws — a failed audit mirror queues for retry
-      // instead of silently vanishing or blocking an already-durable reprint.
       await audit({
         action: override ? "reprint_override" : "reprint_immediate",
         entity_type: refType, entity_id: refId,
@@ -98,7 +93,7 @@ export function ReprintModal({ open, onOpenChange, refType, refId, refLabel, onC
       });
 
       toast.success(override ? "Supervisor override · reprint logged" : "Reprint logged", { description: refLabel });
-      onConfirmed?.({ reason: finalReason, approver, watermark: DUPLICATE_WATERMARK });
+      onConfirmed?.({ reason: finalReason, approver, watermark: DUPLICATE_WATERMARK, reprintCount: priorCount + 1 });
       onOpenChange(false);
     } catch (e: unknown) {
       toast.error("Reprint failed", { description: errorMessage(e) });

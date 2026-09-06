@@ -14,7 +14,7 @@ import { StatusPill } from "@/components/StatusPill";
 import { useNavigate } from "react-router-dom";
 import type { Department, ProductCache, ProductionLabel } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
-import { generateLabelCommandBatch, recordLabelGenerated, NO_PHYSICAL_PRINT_NOTE } from "@/lib/labelPrintLog";
+import { executeGovernedPrintBatch, NO_PHYSICAL_PRINT_NOTE } from "@/lib/governedPrint";
 import { buildProductionLabelPayload } from "@/lib/labelPayloads";
 import { computeBestBefore } from "@/lib/dateMath";
 import { traceMutations } from "@/lib/traceMutations";
@@ -109,14 +109,20 @@ export default function ProductionEntry() {
       // would overwrite the clipboard each time, leaving only the last
       // command retrievable. This is NOT a physical print — see
       // labelPrintLog.ts header.
-      const { copiedToClipboard } = await generateLabelCommandBatch(created.map(label => buildProductionLabelPayload({
-        productName: product?.name, sku: product?.sku, batchNo: form.batch_no,
-        mfgDate: form.mfg_date, shelfLifeDays: form.shelf_life_days,
-        netWeight: form.net_weight, grossWeight: form.gross_weight, labelNo: label.label_no,
+      const batch = await executeGovernedPrintBatch(created.map(label => ({
+        surface: "production_label" as const,
+        refId: label.id,
+        barcodeIdentity: label.label_no,
+        payload: buildProductionLabelPayload({
+          productName: product?.name, sku: product?.sku, batchNo: form.batch_no,
+          mfgDate: form.mfg_date, shelfLifeDays: form.shelf_life_days,
+          netWeight: form.net_weight, grossWeight: form.gross_weight, labelNo: label.label_no,
+        }),
+        actorName: form.operator_name || undefined,
       })));
-      for (const label of created) {
-        await recordLabelGenerated({ refType: "production_label", refId: label.id, copiedToClipboard });
-      }
+      const failed = batch.results.find(r => r.ok === false);
+      if (failed) throw new Error(failed.message);
+      const copiedToClipboard = batch.copiedToClipboard;
       setLastBatch(created);
       setRecent(await listTable<ProductionLabel>("ols_production_labels", { order: "created_at", limit: 8 }));
       toast.success(`Generated ${created.length} label command${created.length > 1 ? "s" : ""}`, {

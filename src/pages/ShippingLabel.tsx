@@ -10,7 +10,7 @@ import { StatusPill } from "@/components/StatusPill";
 import { ReprintModal } from "@/components/ReprintModal";
 import type { Carton, FinancePi, FinancePiCarton, ShippingLabelRow } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
-import { generateLabelCommand, recordLabelGenerated, NO_PHYSICAL_PRINT_NOTE } from "@/lib/labelPrintLog";
+import { executeGovernedPrint, executeGovernedReprint, NO_PHYSICAL_PRINT_NOTE } from "@/lib/governedPrint";
 import { buildShippingLabelPayload } from "@/lib/labelPayloads";
 import { traceMutations } from "@/lib/traceMutations";
 
@@ -72,10 +72,17 @@ export default function ShippingLabel() {
       }, `shipping-label:${carton.id}`);
       // Generate the TSPL command (proves GENERATED); best-effort clipboard
       // copy. This is NOT a physical print — see labelPrintLog.ts header.
-      const { copiedToClipboard } = await generateLabelCommand(buildShippingLabelPayload({
-        consignee: carton.customer_name, invoiceRef: pi?.invoice_ref, shippingNo: lbl.shipping_no, qrRef: lbl.qr_ref,
-      }));
-      await recordLabelGenerated({ refType: "shipping", refId: lbl.id, copiedToClipboard });
+      const printResult = await executeGovernedPrint({
+        surface: "shipping",
+        refId: lbl.id,
+        barcodeIdentity: lbl.shipping_no,
+        qrIdentity: lbl.qr_ref,
+        payload: buildShippingLabelPayload({
+          consignee: carton.customer_name, invoiceRef: pi?.invoice_ref,
+          shippingNo: lbl.shipping_no, qrRef: lbl.qr_ref,
+        }),
+      });
+      if (printResult.ok === false) throw new Error(printResult.message);
       toast.success(`Shipping label ${lbl.shipping_no} — command generated`, { description: NO_PHYSICAL_PRINT_NOTE });
       reload();
     } catch (err: unknown) {
@@ -161,7 +168,29 @@ export default function ShippingLabel() {
           refType="shipping"
           refId={reprint.id}
           refLabel={reprint.shipping_no}
-          onConfirmed={() => reload()}
+          onConfirmed={async ({ reason, watermark, reprintCount }) => {
+            const result = await executeGovernedReprint({
+              surface: "shipping",
+              refId: reprint.id,
+              barcodeIdentity: reprint.shipping_no,
+              qrIdentity: reprint.qr_ref,
+              payload: buildShippingLabelPayload({
+                consignee: reprint.consignee,
+                invoiceRef: reprint.invoice_ref,
+                shippingNo: reprint.shipping_no,
+                qrRef: reprint.qr_ref,
+              }),
+              reprintReason: reason,
+              reprintCount,
+              watermark,
+            });
+            if (result.ok === false) {
+              toast.error("Reprint command failed", { description: result.message });
+              return;
+            }
+            toast.success("Reprint command generated", { description: NO_PHYSICAL_PRINT_NOTE });
+            reload();
+          }}
         />
       )}
     </div>

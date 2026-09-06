@@ -70,6 +70,7 @@ function seed(): DB {
     ols_shipping_labels: [],
     ols_gate_scans: [],
     ols_print_logs: [],
+    ols_print_jobs: [],
     ols_scan_history: [],
     ols_central_scan_submissions: [],
     ols_reprint_requests: [],

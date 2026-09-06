@@ -7,6 +7,9 @@ import { History, Printer } from "lucide-react";
 import { ReprintModal } from "@/components/ReprintModal";
 import type { PrintLogRow } from "@/lib/types";
 import type { ReprintRefType } from "@/lib/reprintPolicy";
+import { executeGovernedReprint, rebuildGovernedPrintRequest, NO_PHYSICAL_PRINT_NOTE } from "@/lib/governedPrint";
+import { toast } from "sonner";
+import { errorMessage } from "@/lib/utils";
 
 export default function PrintLogs() {
   const [logs, setLogs] = useState<PrintLogRow[]>([]);
@@ -60,7 +63,37 @@ export default function PrintLogs() {
           refType={reprint.ref_type as ReprintRefType}
           refId={reprint.ref_id || ""}
           refLabel={`${reprint.ref_type} ${reprint.ref_id?.slice(0, 8)}`}
-          onConfirmed={() => reload()}
+          onConfirmed={async ({ reason, watermark, reprintCount }) => {
+            try {
+              const rebuilt = await rebuildGovernedPrintRequest(
+                reprint.ref_type as ReprintRefType,
+                reprint.ref_id || "",
+              );
+              if ("code" in rebuilt) {
+                toast.error("Reprint failed", { description: rebuilt.message });
+                return;
+              }
+              const result = await executeGovernedReprint({
+                surface: rebuilt.surface,
+                refId: rebuilt.refId,
+                barcodeIdentity: rebuilt.barcodeIdentity,
+                payload: rebuilt.payload,
+                qrIdentity: rebuilt.qrIdentity,
+                reprintReason: reason,
+                reprintCount,
+                watermark,
+                isReprint: true,
+              });
+              if (result.ok === false) {
+                toast.error("Reprint command failed", { description: result.message });
+                return;
+              }
+              toast.success("Reprint command generated", { description: NO_PHYSICAL_PRINT_NOTE });
+              reload();
+            } catch (e: unknown) {
+              toast.error("Reprint failed", { description: errorMessage(e) });
+            }
+          }}
         />
       )}
     </div>

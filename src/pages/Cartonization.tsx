@@ -23,7 +23,7 @@ import type { CentralSubmitResult } from "@/lib/centralSubmit";
 import type { CentralScanSyncStatus } from "@/lib/centralScanStatus";
 import type { Carton, CartonContent, OrderCache, ProductionLabel } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
-import { generateLabelCommand, NO_PHYSICAL_PRINT_NOTE } from "@/lib/labelPrintLog";
+import { executeGovernedPrint, NO_PHYSICAL_PRINT_NOTE } from "@/lib/governedPrint";
 import { buildCartonLabelPayload } from "@/lib/labelPayloads";
 import { insertWithUniqueRetry } from "@/lib/insertWithRetry";
 import { traceMutations } from "@/lib/traceMutations";
@@ -172,11 +172,19 @@ export default function Cartonization() {
       const gross = contents.reduce((s, c) => s + (c.label?.gross_weight || 0), 0);
       // Generate the TSPL command (proves GENERATED); best-effort clipboard
       // copy. This is NOT a physical print — see labelPrintLog.ts header.
-      const { copiedToClipboard } = await generateLabelCommand(buildCartonLabelPayload({
-        customerName: carton.customer_name, orderRef: carton.order_ref,
-        cartonIndex: carton.carton_index, itemCount: contents.length,
-        netWeightKg: net, barcode: barcodeDisplay?.labelBarcode || carton.carton_no,
-      }));
+      const labelBarcode = barcodeDisplay?.labelBarcode || carton.carton_no;
+      const printResult = await executeGovernedPrint({
+        surface: "carton",
+        refId: carton.id,
+        barcodeIdentity: labelBarcode,
+        payload: buildCartonLabelPayload({
+          customerName: carton.customer_name, orderRef: carton.order_ref,
+          cartonIndex: carton.carton_index, itemCount: contents.length,
+          netWeightKg: net, barcode: labelBarcode,
+        }),
+      });
+      if (printResult.ok === false) throw new Error(printResult.message);
+      const copiedToClipboard = printResult.copiedToClipboard;
       await traceMutations.finalizeCarton(
         carton.id, net, gross, copiedToClipboard, `finalize-carton:${carton.id}`,
       );
