@@ -24,6 +24,19 @@ describe("governed Trace mutation client", () => {
     });
   });
 
+  it("routes carton seal through Core finalize RPC with idempotency key", async () => {
+    invoke.mockResolvedValue({ id: "carton-1", status: "packed" });
+    const { traceMutations } = await import("./traceMutations");
+    await traceMutations.finalizeCarton("carton-1", 5, 5.25, true, "finalize-carton:carton-1");
+    expect(invoke).toHaveBeenCalledWith("trace_finalize_carton_v1", {
+      p_carton_id: "carton-1",
+      p_net_weight: 5,
+      p_gross_weight: 5.25,
+      p_copied_to_clipboard: true,
+      p_idempotency_key: "finalize-carton:carton-1",
+    });
+  });
+
   it("routes printer settings saves through Core authority instead of raw ols_printers updates", async () => {
     const settings = { darkness: 8, speed: 4, gapMm: 3, dpi: 203 };
     invoke.mockResolvedValue({ id: "printer-1", settings });
