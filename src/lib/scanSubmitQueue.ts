@@ -14,6 +14,10 @@ import {
   type CentralSubmitRequest,
   type CentralSubmitResult,
 } from "@/lib/centralSubmit";
+import {
+  isPermanentSubmitFailureReason,
+  validateCentralSubmitEnvelope,
+} from "@/lib/centralTraceContract";
 import { errorMessage } from "@/lib/utils";
 
 export interface PendingScanEnvelope {
@@ -43,16 +47,6 @@ const BASE_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 60_000;
 const FLUSH_INTERVAL_MS = 15_000;
 
-/** Authority / validation failures that must not be silently retried. */
-const PERMANENT_FAILURE_REASONS = new Set([
-  "unauthenticated",
-  "forbidden",
-  "not_verified",
-  "invalid_request",
-  "invalid_contract",
-  "submit_disabled",
-]);
-
 type QueueListener = (size: number) => void;
 type ResolutionListener = (idempotencyKey: string, result: CentralSubmitResult) => void;
 const listeners = new Set<QueueListener>();
@@ -60,11 +54,7 @@ const resolutionListeners = new Set<ResolutionListener>();
 let flushing = false;
 
 export function isPermanentSubmitFailure(reason?: string): boolean {
-  if (!reason) return false;
-  const normalized = reason.toLowerCase();
-  if (PERMANENT_FAILURE_REASONS.has(normalized)) return true;
-  if (normalized.includes("forbidden") || normalized.includes("not_verified")) return true;
-  return false;
+  return isPermanentSubmitFailureReason(reason);
 }
 
 function currentOwnerId(): string | undefined {
@@ -224,6 +214,16 @@ export async function submitWithOfflineRetry(
       status: "failed",
       message: "Sign in required to submit scans",
       failureReason: "unauthenticated",
+    };
+  }
+
+  const contract = validateCentralSubmitEnvelope(req.idempotencyKey, req.payload);
+  if (contract.ok === false) {
+    return {
+      ok: false,
+      status: "failed",
+      message: contract.message,
+      failureReason: "invalid_contract",
     };
   }
 

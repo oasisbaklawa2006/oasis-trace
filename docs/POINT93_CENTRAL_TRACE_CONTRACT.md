@@ -3,7 +3,8 @@
 **ASM:** Central #459 defines Point 93 = Central–Trace software contract.  
 **Repo:** `oasisbaklawa2006/oasis-trace` (Trace authority)  
 **Contract version:** `1.0` (`CENTRAL_TRACE_CONTRACT_VERSION`)  
-**Date:** 2026-09-05  
+**Date:** 2026-09-06  
+**Trace main SHA (baseline):** `a5c347311325607a0a82b1ffe6f76ffd0b44ce1f`  
 **Physical scanner UAT:** Separate (#462 / original Point96 offline retry lane)
 
 ---
@@ -46,18 +47,43 @@ Programmatic export: `CENTRAL_TRACE_PRODUCER_CONSUMER_MATRIX` in `src/lib/centra
 
 | Function | Purpose |
 |----------|---------|
+| `resolveCentralOrderId` | Map `ols_orders_cache.external_ref` → canonical Central UUID; null when unbound |
+| `stampContractVersion` | Emit `contract_version: "1.0"` on producer payloads |
+| `finalizeCentralScanHandoff` | Producer fail-closed: stamp + validate envelope before `ready_to_submit` |
 | `validateCentralScanPayload` | Zod fail-closed v1.0 shape check (`.strict()`; unknown top-level fields rejected) |
 | `validateIdempotencyKeyConsistency` | Key must match payload identity |
 | `validateCentralSubmitEnvelope` | Full pre-submit gate in `centralSubmit` |
 | `isPermanentContractFailure` | Contract rejections are non-retryable |
+| `isPermanentSubmitFailureReason` | Shared permanent failure set for submit + offline queue |
 
-**v1.0 payload rules:** Both `dispatch_gate` and `carton` schemas use Zod `.strict()`. The only optional extension field is `contract_version` with literal value `"1.0"`. Any other unrecognized top-level field fails closed as `invalid_contract`.
+**v1.0 identity binding:** `scanService` uses `external_ref` (not local cache `id`) for `order_id` and idempotency keys. Orders without a valid Central UUID binding return `central_order_unbound` with `preview_only` sync — local audit only, no Central handoff.
 
-**Idempotency key normalization:** `submitCentralScan` trims the accepted key once and uses that normalized value for validation, duplicate lookup (`hasCentralSubmission`), mock storage, and edge-function transport — padded and unpadded keys share the same submission identity.
-
-Wired into `submitCentralScan` before network/mock submit. `invalid_contract` added to permanent failure set in `scanSubmitQueue`.
+Wired into `scanService` (producer), `submitCentralScan` (consumer), and `scanSubmitQueue` (pre-enqueue validation). The legacy `submit-central-scan` edge function in this repo is **frozen** — server-side contract validation is a **Core prerequisite** in `oasisbaklawa2006/oasis-supabase-core` (see below).
 
 ---
+
+## Core backend authority evidence
+
+| Check | Result |
+|-------|--------|
+| Trace `check-core-backend-authority.sh` vs `main` | **Pass** — no `db/*.sql`, `supabase/migrations/*`, or `supabase/functions/*` mutations in this PR |
+| Trace exact-head SHA | `b202315084d4d688700085e3be020792d4757ee6` |
+| Core production anchor SHA | `69ae885f0baba3a6bd6a1b2862ae5be669808eb4` (Point72 order intake, Core #226) |
+| Core Production Migration Release | Run `34050874074` — workflow **success**; ledger/preflight **passed**; approved deployment **passed** (artifacts: `production-migration-deployment-69ae885…`, `production-migration-preflight-69ae885…`) |
+| Prior release run (superseded) | Run `34040050288` — deployment job skipped |
+| Trace server proxy mutation | **Reverted** — prior edge-fn edits removed to preserve Core ownership boundary |
+
+### Point93 ↔ Core anchor reconciliation
+
+| Assumption | Core anchor evidence | Point93 Trace adapter |
+|------------|---------------------|----------------------|
+| Canonical order UUID for scan `order_id` | Point72 adds `resolve_order_intake_source_identity_v1` on `public.orders` (intake attribution). **Does not** populate `ols_orders_cache.external_ref` in Trace. | `resolveCentralOrderId` reads `external_ref` when present; `central_order_unbound` → `preview_only` when absent |
+| Order duplicate / intake replay | Point72 migration **deployed** to production via run `34050874074` (`20260906120000_point72_order_intake_source_attribution_closure.sql` + pgTAP) | Out of scope — Trace does not mint order truth |
+| `submit-central-scan` server v1 validation | **Not present** at Core anchor SHA — **not verified deployed** (no `submit-central-scan` path in Core repo) | Client-side only: `validateCentralSubmitEnvelope` in `centralSubmit` + `scanSubmitQueue` |
+| `app_metadata.ols_roles` role gate (server) | Not verified at Core anchor for scan submit | Client: `roles.ts` (`requireSubmitRole`) |
+| Legacy `submit-central-scan` copy in Trace repo | Frozen historical artifact | Trace invokes but does not own or mutate |
+
+**Core prerequisites still open (not Trace lane):** live `ols_orders_cache.external_ref` sync from Core `public.orders.id`; `submit-central-scan` v1.0 server validation in Core (independently verifiable); Trace `ols_central_scan_submissions` migration + edge secrets applied.
 
 ## Contract test matrix
 
@@ -71,18 +97,27 @@ Wired into `submitCentralScan` before network/mock submit. `invalid_contract` ad
 | Unknown version / shape | `centralTraceContract.test.ts` |
 | Unrecognized strict-schema field | `centralTraceContract.test.ts` |
 | Padded idempotency key duplicate | `centralSubmit.test.ts` |
+| Producer (`scanService`) + `external_ref` binding | `scanService.test.ts`, `centralTraceContract.test.ts` |
+| Offline enqueue contract gate | `scanSubmitQueue.test.ts` |
 | Central authority reject (mock) | `centralSubmit.test.ts`, `scanSubmitQueue.test.ts` |
 
 ---
 
 ## Remaining physical / ops dependencies (not closed by Point 93)
 
-- Physical scanner UAT evidence (#462)
-- `db/ols_central_scan_submissions.sql` applied to Supabase
+### Software (Core/runtime — not Trace lane)
+
+- `ols_orders_cache.external_ref` live sync from Core `public.orders.id` (Point72 deployed intake attribution on Core; Trace cache sync still separate)
+- `submit-central-scan` v1.0 server validation in `oasis-supabase-core` — **not verified deployed** at anchor `69ae885`
+- Trace `ols_central_scan_submissions` migration applied to Supabase
 - Edge function deployed with `CENTRAL_SCAN_INGEST_URL` + signing secret
 - `VITE_CENTRAL_SCAN_SUBMIT_ENABLED=true` only after staging pilot
 - JWT `ols_roles` on all operator accounts
 - RLS hardening (`ols_enable_rls_authenticated.sql`)
+
+### Physical (separate evidence lane)
+
+- Physical scanner UAT evidence (#462)
 
 ---
 

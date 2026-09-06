@@ -91,6 +91,12 @@ export const demo = {
   insert<T extends Row>(table: string, row: Partial<T>): T {
     db[table] ||= [];
     const full = { id: crypto.randomUUID(), created_at: new Date().toISOString(), ...row } as unknown as T;
+    const id = full.id as string;
+    if (db[table].some(r => r.id === id)) {
+      const err = new Error("duplicate key value violates unique constraint") as Error & { code: string };
+      err.code = "23505";
+      throw err;
+    }
     db[table].push(full);
     save(db);
     return full;

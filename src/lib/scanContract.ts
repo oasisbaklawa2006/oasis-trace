@@ -19,6 +19,7 @@ export type CartonBarcodeMode = "central" | "legacy";
 export type CartonBarcodeKind = "central" | "legacy" | "invalid";
 
 export interface CentralDispatchGateScanPayload {
+  contract_version?: "1.0";
   source_app: typeof SOURCE_APP;
   order_id: string;
   order_number: string;
@@ -32,6 +33,7 @@ export interface CentralDispatchGateScanPayload {
 }
 
 export interface CentralCartonIdentityScanPayload {
+  contract_version?: "1.0";
   source_app: typeof SOURCE_APP;
   order_id?: string;
   order_number?: string;
@@ -50,7 +52,8 @@ export type ScanMessageCode =
   | "wrong_carton_for_order"
   | "order_not_found"
   | "barcode_format_invalid"
-  | "scan_already_recorded";
+  | "scan_already_recorded"
+  | "central_order_unbound";
 
 export const SCAN_USER_MESSAGES: Record<ScanMessageCode, string> = {
   gate_scan_verified: "Gate scan verified",
@@ -59,6 +62,7 @@ export const SCAN_USER_MESSAGES: Record<ScanMessageCode, string> = {
   order_not_found: "Order not found",
   barcode_format_invalid: "Barcode format invalid",
   scan_already_recorded: "Scan already recorded",
+  central_order_unbound: "Order not linked to Central",
 };
 
 export function getScanUserMessage(code: ScanMessageCode): string {

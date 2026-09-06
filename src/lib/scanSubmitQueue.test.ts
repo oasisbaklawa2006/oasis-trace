@@ -14,9 +14,13 @@ import {
   unregisterScanQueueSessionProvider,
 } from "./scanSubmitQueue";
 
+const CENTRAL_ORDER_ID = "550e8400-e29b-41d4-a716-446655440001";
+const CENTRAL_ORDER_ID_B = "550e8400-e29b-41d4-a716-446655440099";
+
 const dispatchPayload = {
+  contract_version: "1.0",
   source_app: "barcode_app",
-  order_id: "order-1",
+  order_id: CENTRAL_ORDER_ID,
   order_number: "SO-2026-0001",
   scan_type: "dispatch_gate",
   verification_type: "gate_check",
@@ -26,6 +30,9 @@ const dispatchPayload = {
   verification_status: "verified",
   scan_source: "barcode_app_gate_scan",
 };
+
+const dispatchKey = `barcode_app|dispatch_gate|CTN-SO-2026-0001|${CENTRAL_ORDER_ID}`;
+const dispatchKeyB = `barcode_app|dispatch_gate|CTN-SO-2026-0001|${CENTRAL_ORDER_ID_B}`;
 
 const session = {
   user: { id: "u1", app_metadata: { ols_roles: ["dispatch"] } },
@@ -79,7 +86,7 @@ describe("scanSubmitQueue", () => {
     vi.mocked(isOnline).mockReturnValue(false);
 
     const r = await submitWithOfflineRetry({
-      idempotencyKey: "barcode_app|dispatch_gate|CTN-SO-2026-0001|order-1",
+      idempotencyKey: `barcode_app|dispatch_gate|CTN-SO-2026-0001|${CENTRAL_ORDER_ID}`,
       payload: dispatchPayload,
       scanHistoryId: "hist-1",
       session,
@@ -91,9 +98,23 @@ describe("scanSubmitQueue", () => {
 
     const pending = getPendingScans();
     expect(pending).toHaveLength(1);
-    expect(pending[0].idempotencyKey).toBe("barcode_app|dispatch_gate|CTN-SO-2026-0001|order-1");
+    expect(pending[0].idempotencyKey).toBe(`barcode_app|dispatch_gate|CTN-SO-2026-0001|${CENTRAL_ORDER_ID}`);
     expect(pending[0].payload).toEqual(dispatchPayload);
     expect(pending[0].scanHistoryId).toBe("hist-1");
+  });
+
+  it("rejects invalid contract before offline enqueue", async () => {
+    vi.mocked(isOnline).mockReturnValue(false);
+
+    const r = await submitWithOfflineRetry({
+      idempotencyKey: "barcode_app|dispatch_gate|CTN-SO-2026-0001|wrong-id",
+      payload: dispatchPayload,
+      session,
+    });
+
+    expect(r.failureReason).toBe("invalid_contract");
+    expect(r.queued).toBeUndefined();
+    expect(getPendingScans()).toHaveLength(0);
   });
 
   it("reconnect replay drains queue on flush", async () => {
@@ -247,7 +268,7 @@ describe("scanSubmitQueue", () => {
     });
 
     const r = await submitWithOfflineRetry({
-      idempotencyKey: "k-transient",
+      idempotencyKey: dispatchKey,
       payload: dispatchPayload,
       session,
     });
@@ -290,7 +311,7 @@ describe("scanSubmitQueue", () => {
     });
 
     const r = await submitWithOfflineRetry({
-      idempotencyKey: "k-online-perm",
+      idempotencyKey: dispatchKey,
       payload: dispatchPayload,
       session,
     });
@@ -298,7 +319,7 @@ describe("scanSubmitQueue", () => {
     expect(r.failureReason).toBe("forbidden");
     const failures = getPermanentFailures();
     expect(failures).toHaveLength(1);
-    expect(failures[0].idempotencyKey).toBe("k-online-perm");
+    expect(failures[0].idempotencyKey).toBe(dispatchKey);
     expect(failures[0].ownerUserId).toBe("u1");
   });
 
@@ -314,14 +335,14 @@ describe("scanSubmitQueue", () => {
     });
 
     await submitWithOfflineRetry({
-      idempotencyKey: "k-a",
+      idempotencyKey: dispatchKey,
       payload: dispatchPayload,
       session,
     });
 
     enqueuePendingScan({
-      idempotencyKey: "k-b",
-      payload: { ...dispatchPayload, order_id: "order-2" },
+      idempotencyKey: dispatchKeyB,
+      payload: { ...dispatchPayload, order_id: CENTRAL_ORDER_ID_B },
       session,
     });
 
@@ -329,7 +350,7 @@ describe("scanSubmitQueue", () => {
     const flush = await flushScanSubmitQueue(session);
     expect(flush.skipped).toBe(1);
     expect(submitMock).not.toHaveBeenCalled();
-    expect(getPendingScans().map(e => e.idempotencyKey)).toEqual(["k-a", "k-b"]);
+    expect(getPendingScans().map(e => e.idempotencyKey)).toEqual([dispatchKey, dispatchKeyB]);
 
     vi.useRealTimers();
   });
