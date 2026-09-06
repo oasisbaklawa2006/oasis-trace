@@ -111,8 +111,9 @@ export const CENTRAL_TRACE_PRODUCER_CONSUMER_MATRIX = [
     idempotencyKey: "client-provided; deduped in ols_central_scan_submissions",
     failureSemantics: "409 duplicate; 502 Central reject; permanent client failures not retried",
     version: CENTRAL_TRACE_CONTRACT_VERSION,
-    sources: ["src/lib/centralSubmit.ts", "supabase/functions/submit-central-scan/index.ts"],
+    sources: ["src/lib/centralSubmit.ts"],
     tests: ["src/lib/centralSubmit.test.ts", "src/lib/scanSubmitQueue.test.ts"],
+    corePrerequisite: "oasis-supabase-core: submit-central-scan server-side v1.0 validation (frozen legacy copy in Trace repo)",
   },
   {
     surface: "offline_retry_queue",

@@ -58,9 +58,20 @@ Programmatic export: `CENTRAL_TRACE_PRODUCER_CONSUMER_MATRIX` in `src/lib/centra
 
 **v1.0 identity binding:** `scanService` uses `external_ref` (not local cache `id`) for `order_id` and idempotency keys. Orders without a valid Central UUID binding return `central_order_unbound` with `preview_only` sync — local audit only, no Central handoff.
 
-Wired into `scanService` (producer), `submitCentralScan` (consumer), `scanSubmitQueue` (pre-enqueue validation), and `submit-central-scan` edge function (server proxy).
+Wired into `scanService` (producer), `submitCentralScan` (consumer), and `scanSubmitQueue` (pre-enqueue validation). The legacy `submit-central-scan` edge function in this repo is **frozen** — server-side contract validation is a **Core prerequisite** in `oasisbaklawa2006/oasis-supabase-core` (see below).
 
 ---
+
+## Core backend authority evidence
+
+| Check | Result |
+|-------|--------|
+| Trace `check-core-backend-authority.sh` vs `main` | **Pass** — no `db/*.sql`, `supabase/migrations/*`, or `supabase/functions/*` mutations in this PR |
+| Core canonical main SHA (reference) | `69ae885f0baba3a6bd6a1b2862ae5be669808eb4` (Point72 order intake closure, #226) |
+| Point72 production deployment | **Not claimed** — Core push preflight passed; protected deployment job was skipped |
+| Trace server proxy mutation | **Reverted** — prior edge-fn edits removed to preserve Core ownership boundary |
+
+**Core prerequisite (not Trace lane):** deploy `submit-central-scan` contract validation + `app_metadata.ols_roles`-only role gate from `oasis-supabase-core`. Trace client adapter enforces the same v1.0 envelope fail-closed before any invoke.
 
 ## Contract test matrix
 
