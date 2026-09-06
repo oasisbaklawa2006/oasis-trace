@@ -188,6 +188,18 @@ export async function processDispatchGateCtnSoScan(
 
   const centralOrderId = resolveCentralOrderId(order);
   if (!centralOrderId) {
+    const idempotencyKey = scanIdempotencyKey("dispatch_gate", match.scanned, order.id);
+    if (await hasIdempotentScan(idempotencyKey)) {
+      return {
+        ok: false,
+        userMessage: getScanUserMessage("scan_already_recorded"),
+        messageCode: "scan_already_recorded",
+        idempotencyKey,
+        duplicate: true,
+        readyForCentral: false,
+      };
+    }
+
     const payload = stampContractVersion(
       buildDispatchGateScanPayload({
         order_id: order.id,
@@ -201,7 +213,7 @@ export async function processDispatchGateCtnSoScan(
       scan_value: match.scanned,
       scan_context: "gate_ctn_so",
       result: "green",
-      idempotencyKey: scanIdempotencyKey("dispatch_gate", match.scanned, order.id),
+      idempotencyKey,
       payload,
       messageCode: "central_order_unbound",
       userMessage: getScanUserMessage("central_order_unbound"),
@@ -211,6 +223,7 @@ export async function processDispatchGateCtnSoScan(
       ok: true,
       userMessage: getScanUserMessage("central_order_unbound"),
       messageCode: "central_order_unbound",
+      idempotencyKey,
       scanHistoryId,
       payload,
       readyForCentral: false,
@@ -348,6 +361,18 @@ export async function processCartonIdentityScan(
 
   const centralOrderId = resolveCentralOrderId(order);
   if (!centralOrderId) {
+    const idempotencyKey = scanIdempotencyKey("carton", match.scanned, order.id);
+    if (await hasIdempotentScan(idempotencyKey)) {
+      return {
+        ok: false,
+        userMessage: getScanUserMessage("scan_already_recorded"),
+        messageCode: "scan_already_recorded",
+        idempotencyKey,
+        duplicate: true,
+        readyForCentral: false,
+      };
+    }
+
     const payload = stampContractVersion(
       buildCartonIdentityScanPayload({
         order_id: order.id,
@@ -361,7 +386,7 @@ export async function processCartonIdentityScan(
       scan_value: match.scanned,
       scan_context: "carton_identity",
       result: "green",
-      idempotencyKey: scanIdempotencyKey("carton", match.scanned, order.id),
+      idempotencyKey,
       payload,
       messageCode: "central_order_unbound",
       userMessage: getScanUserMessage("central_order_unbound"),
@@ -371,6 +396,7 @@ export async function processCartonIdentityScan(
       ok: true,
       userMessage: getScanUserMessage("central_order_unbound"),
       messageCode: "central_order_unbound",
+      idempotencyKey,
       scanHistoryId,
       payload,
       readyForCentral: false,
