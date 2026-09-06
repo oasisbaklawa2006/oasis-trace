@@ -26,6 +26,12 @@ import { generateLabelCommand, NO_PHYSICAL_PRINT_NOTE } from "@/lib/labelPrintLo
 import { buildCartonLabelPayload } from "@/lib/labelPayloads";
 import { insertWithUniqueRetry } from "@/lib/insertWithRetry";
 import { traceMutations } from "@/lib/traceMutations";
+import {
+  validateAddContent,
+  validateCreateCarton,
+  validateOrderPackTotals,
+  validateSealCarton,
+} from "@/lib/packingContract";
 
 interface CartonContentWithLabel extends CartonContent {
   label?: ProductionLabel;
@@ -46,6 +52,8 @@ export default function Cartonization() {
   const [cartonError, setCartonError] = useState<string | null>(null);
   const { session, canSubmitCentral } = useOlsSession();
   const [recentCartons, setRecentCartons] = useState<Carton[]>([]);
+  const [allCartons, setAllCartons] = useState<Carton[]>([]);
+  const [allContents, setAllContents] = useState<CartonContent[]>([]);
 
   usePendingCentralSubmitSync(identityResult?.idempotencyKey, setSubmitResult);
 
@@ -61,7 +69,10 @@ export default function Cartonization() {
     setLabels(lbls);
     const cc = await listTable<CartonContent>("ols_carton_contents");
     setPacked(new Set(cc.filter(c => c.production_label_id).map(c => c.production_label_id!)));
-    setRecentCartons(await listTable<Carton>("ols_cartons", { order: "created_at", limit: 6 }));
+    setAllContents(cc);
+    const allC = await listTable<Carton>("ols_cartons", { order: "created_at" });
+    setAllCartons(allC);
+    setRecentCartons(allC.slice(0, 6));
   })(); }, []);
 
   async function startCarton() {
@@ -69,6 +80,12 @@ export default function Cartonization() {
       setCartonError(null);
       if (!orderRef) { toast.error("Pick an order first"); return; }
       const order = orders.find(o => o.order_number === orderRef);
+      const createCheck = validateCreateCarton({ orderRef, orders, existingCartonNos: allCartons.map(c => c.carton_no) });
+      if (!createCheck.ok) {
+        setCartonError(createCheck.message || "Failed to create carton");
+        toast.error(createCheck.message || "Failed to create carton", { duration: Infinity });
+        return;
+      }
       // carton_no is randomly generated (numbering.ts) and can collide under
       // concurrent multi-terminal use — retry with a fresh id (and matching
       // metadata) on a confirmed unique-constraint violation, bounded.
@@ -134,7 +151,34 @@ export default function Cartonization() {
       if (!code || !carton) return;
       const lbl = labels.find(l => l.label_no === code);
       if (!lbl) { feedback("error"); toast.error("Label not found", { description: "Use manual add if needed." }); return; }
-      if (packed.has(lbl.id)) { feedback("dup"); toast.error("Duplicate scan blocked", { description: "Label already in another active carton." }); return; }
+      const addCheck = validateAddContent({
+        carton,
+        labelId: lbl.id,
+        label: lbl,
+        existingContents: contents,
+        packedLabelIds: packed,
+      });
+      if (!addCheck.ok) {
+        feedback(addCheck.code === "label_already_packed" || addCheck.code === "duplicate_label" ? "dup" : "error");
+        toast.error(addCheck.message || "Cannot add label");
+        return;
+      }
+      const order = orders.find(o => o.order_number === carton.order_ref);
+      if (order) {
+        const overpackCheck = validateOrderPackTotals({
+          order,
+          orderRef: carton.order_ref || "",
+          allCartonContents: allContents,
+          cartonsForOrder: allCartons,
+          labels,
+          proposedLabelId: lbl.id,
+        });
+        if (!overpackCheck.ok) {
+          feedback("error");
+          toast.error(overpackCheck.message || "Overpack rejected", { description: overpackCheck.details?.join("; ") });
+          return;
+        }
+      }
       const row = await insertRow<CartonContent>("ols_carton_contents", { carton_id: carton.id, production_label_id: lbl.id });
       await insertRow("ols_inventory_movements", {
         production_label_id: lbl.id, from_location: "store", to_location: "packing",
@@ -142,6 +186,7 @@ export default function Cartonization() {
       });
       setContents(c => [...c, { ...row, label: lbl }]);
       setPacked(p => new Set(p).add(lbl.id));
+      setAllContents(prev => [...prev, row]);
       setScanInput("");
       feedback("ok");
     } catch (err: unknown) {
@@ -155,14 +200,18 @@ export default function Cartonization() {
     try {
       setCartonError(null);
       if (!carton || contents.length === 0) { toast.error("Add at least one label"); return; }
-      if (supportsCentralBarcode(carton.order_ref || "") && !identityResult?.ok) {
-        toast.error("Verify Central carton identity first", {
-          description: "Scan the CTN-SO barcode before packing.",
-        });
+      const sealCheck = validateSealCarton({
+        carton,
+        contents,
+        labels,
+        identityVerified: !!identityResult?.ok,
+      });
+      if (!sealCheck.ok) {
+        toast.error(sealCheck.message || "Cannot seal carton", { description: sealCheck.details?.join("; ") });
         return;
       }
-      const net = contents.reduce((s, c) => s + (c.label?.net_weight || 0), 0);
-      const gross = contents.reduce((s, c) => s + (c.label?.gross_weight || 0), 0);
+      const net = sealCheck.data?.net ?? 0;
+      const gross = sealCheck.data?.gross ?? 0;
       // Generate the TSPL command (proves GENERATED); best-effort clipboard
       // copy. This is NOT a physical print — see labelPrintLog.ts header.
       const { copiedToClipboard } = await generateLabelCommand(buildCartonLabelPayload({
@@ -175,7 +224,9 @@ export default function Cartonization() {
       );
       toast.success("Carton packed — label command generated", { description: NO_PHYSICAL_PRINT_NOTE });
       setCarton(null); setContents([]); setIdentityResult(null);
-      setRecentCartons(await listTable<Carton>("ols_cartons", { order: "created_at", limit: 6 }));
+      const allC = await listTable<Carton>("ols_cartons");
+      setAllCartons(allC);
+      setRecentCartons(allC.slice(0, 6));
     } catch (err: unknown) {
       const msg = errorMessage(err, "Failed to finalize carton");
       setCartonError(msg);
