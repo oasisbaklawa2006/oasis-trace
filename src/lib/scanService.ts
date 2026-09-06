@@ -2,7 +2,7 @@
  * Scan flow orchestration — CTN-SO verification, Central payload build,
  * idempotency guard, local scan history, ready_to_submit status.
  */
-import { listTable, insertRow } from "@/lib/data";
+import { insertRow, isDuplicateError } from "@/lib/data";
 import {
   buildCartonIdentityScanPayload,
   buildDispatchGateScanPayload,
@@ -110,13 +110,20 @@ export interface ScanFlowResult {
   recorded?: boolean;
 }
 
-export async function hasIdempotentScan(idempotencyKey: string): Promise<boolean> {
-  const rows = await listTable<{ metadata?: { central_idempotency_key?: string } }>(
-    "ols_scan_history",
-    { limit: 1000 },
-  );
-  return rows.some(r => r.metadata?.central_idempotency_key === idempotencyKey);
+/** Deterministic ols_scan_history PK from canonical central_idempotency_key. */
+export async function deterministicScanHistoryId(idempotencyKey: string): Promise<string> {
+  const data = new TextEncoder().encode(`ols_scan_history:${idempotencyKey}`);
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  const bytes = new Uint8Array(hash.slice(0, 16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map(b => b.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
+
+type RecordScanEventResult =
+  | { ok: true; scanHistoryId: string }
+  | { ok: false; duplicate: true };
 
 async function recordCentralScanEvent(opts: {
   scan_value: string;
@@ -127,20 +134,40 @@ async function recordCentralScanEvent(opts: {
   messageCode?: ScanMessageCode;
   userMessage?: string;
   syncStatus?: "preview_only" | "ready_to_submit";
-}): Promise<string | undefined> {
-  const row = await insertRow<{ id: string }>("ols_scan_history", {
-    scan_value: opts.scan_value,
-    scan_context: opts.scan_context,
-    result: opts.result,
-    metadata: {
-      central_idempotency_key: opts.idempotencyKey,
-      central_payload: opts.payload ?? null,
-      message_code: opts.messageCode ?? null,
-      user_message: opts.userMessage ?? null,
-      central_sync_status: opts.syncStatus ?? (opts.result === "green" ? "ready_to_submit" : "preview_only"),
-    },
-  });
-  return row?.id;
+}): Promise<RecordScanEventResult> {
+  const scanHistoryId = await deterministicScanHistoryId(opts.idempotencyKey);
+  try {
+    await insertRow<{ id: string }>("ols_scan_history", {
+      id: scanHistoryId,
+      scan_value: opts.scan_value,
+      scan_context: opts.scan_context,
+      result: opts.result,
+      metadata: {
+        central_idempotency_key: opts.idempotencyKey,
+        central_payload: opts.payload ?? null,
+        message_code: opts.messageCode ?? null,
+        user_message: opts.userMessage ?? null,
+        central_sync_status: opts.syncStatus ?? (opts.result === "green" ? "ready_to_submit" : "preview_only"),
+      },
+    });
+    return { ok: true, scanHistoryId };
+  } catch (err: unknown) {
+    if (isDuplicateError(err)) {
+      return { ok: false, duplicate: true };
+    }
+    throw err;
+  }
+}
+
+function duplicateScanResult(idempotencyKey: string): ScanFlowResult {
+  return {
+    ok: false,
+    userMessage: getScanUserMessage("scan_already_recorded"),
+    messageCode: "scan_already_recorded",
+    idempotencyKey,
+    duplicate: true,
+    readyForCentral: false,
+  };
 }
 
 export async function processDispatchGateCtnSoScan(
@@ -189,17 +216,6 @@ export async function processDispatchGateCtnSoScan(
   const centralOrderId = resolveCentralOrderId(order);
   if (!centralOrderId) {
     const idempotencyKey = scanIdempotencyKey("dispatch_gate", match.scanned, order.id);
-    if (await hasIdempotentScan(idempotencyKey)) {
-      return {
-        ok: false,
-        userMessage: getScanUserMessage("scan_already_recorded"),
-        messageCode: "scan_already_recorded",
-        idempotencyKey,
-        duplicate: true,
-        readyForCentral: false,
-      };
-    }
-
     const payload = stampContractVersion(
       buildDispatchGateScanPayload({
         order_id: order.id,
@@ -209,7 +225,7 @@ export async function processDispatchGateCtnSoScan(
         verification_status: "verified",
       }),
     );
-    const scanHistoryId = await recordCentralScanEvent({
+    const recorded = await recordCentralScanEvent({
       scan_value: match.scanned,
       scan_context: "gate_ctn_so",
       result: "green",
@@ -219,12 +235,13 @@ export async function processDispatchGateCtnSoScan(
       userMessage: getScanUserMessage("central_order_unbound"),
       syncStatus: "preview_only",
     });
+    if (!recorded.ok) return duplicateScanResult(idempotencyKey);
     return {
       ok: true,
       userMessage: getScanUserMessage("central_order_unbound"),
       messageCode: "central_order_unbound",
       idempotencyKey,
-      scanHistoryId,
+      scanHistoryId: recorded.scanHistoryId,
       payload,
       readyForCentral: false,
       centralSyncStatus: "preview_only",
@@ -233,16 +250,6 @@ export async function processDispatchGateCtnSoScan(
   }
 
   const idempotencyKey = scanIdempotencyKey("dispatch_gate", match.scanned, centralOrderId);
-  if (await hasIdempotentScan(idempotencyKey)) {
-    return {
-      ok: false,
-      userMessage: getScanUserMessage("scan_already_recorded"),
-      messageCode: "scan_already_recorded",
-      idempotencyKey,
-      duplicate: true,
-      readyForCentral: false,
-    };
-  }
 
   const payload = buildDispatchGateScanPayload({
     order_id: centralOrderId,
@@ -264,7 +271,7 @@ export async function processDispatchGateCtnSoScan(
 
   const stampedPayload = handoff.payload;
 
-  const scanHistoryId = await recordCentralScanEvent({
+  const recorded = await recordCentralScanEvent({
     scan_value: match.scanned,
     scan_context: "gate_ctn_so",
     result: "green",
@@ -274,6 +281,7 @@ export async function processDispatchGateCtnSoScan(
     userMessage: getScanUserMessage("gate_scan_verified"),
     syncStatus: "ready_to_submit",
   });
+  if (!recorded.ok) return duplicateScanResult(idempotencyKey);
 
   // Real FK when unambiguous; never a guess when the order has zero or
   // multiple shipping labels (see resolveUnambiguousShippingLabelId).
@@ -291,7 +299,7 @@ export async function processDispatchGateCtnSoScan(
     userMessage: getScanUserMessage("gate_scan_verified"),
     messageCode: "gate_scan_verified",
     idempotencyKey,
-    scanHistoryId,
+    scanHistoryId: recorded.scanHistoryId,
     payload: stampedPayload,
     readyForCentral: true,
     centralSyncStatus: "ready_to_submit",
@@ -362,17 +370,6 @@ export async function processCartonIdentityScan(
   const centralOrderId = resolveCentralOrderId(order);
   if (!centralOrderId) {
     const idempotencyKey = scanIdempotencyKey("carton", match.scanned, order.id);
-    if (await hasIdempotentScan(idempotencyKey)) {
-      return {
-        ok: false,
-        userMessage: getScanUserMessage("scan_already_recorded"),
-        messageCode: "scan_already_recorded",
-        idempotencyKey,
-        duplicate: true,
-        readyForCentral: false,
-      };
-    }
-
     const payload = stampContractVersion(
       buildCartonIdentityScanPayload({
         order_id: order.id,
@@ -382,7 +379,7 @@ export async function processCartonIdentityScan(
         verification_status: "verified",
       }),
     );
-    const scanHistoryId = await recordCentralScanEvent({
+    const recorded = await recordCentralScanEvent({
       scan_value: match.scanned,
       scan_context: "carton_identity",
       result: "green",
@@ -392,12 +389,13 @@ export async function processCartonIdentityScan(
       userMessage: getScanUserMessage("central_order_unbound"),
       syncStatus: "preview_only",
     });
+    if (!recorded.ok) return duplicateScanResult(idempotencyKey);
     return {
       ok: true,
       userMessage: getScanUserMessage("central_order_unbound"),
       messageCode: "central_order_unbound",
       idempotencyKey,
-      scanHistoryId,
+      scanHistoryId: recorded.scanHistoryId,
       payload,
       readyForCentral: false,
       centralSyncStatus: "preview_only",
@@ -406,16 +404,6 @@ export async function processCartonIdentityScan(
   }
 
   const idempotencyKey = scanIdempotencyKey("carton", match.scanned, centralOrderId);
-  if (await hasIdempotentScan(idempotencyKey)) {
-    return {
-      ok: false,
-      userMessage: getScanUserMessage("scan_already_recorded"),
-      messageCode: "scan_already_recorded",
-      idempotencyKey,
-      duplicate: true,
-      readyForCentral: false,
-    };
-  }
 
   const payload = buildCartonIdentityScanPayload({
     order_id: centralOrderId,
@@ -437,7 +425,7 @@ export async function processCartonIdentityScan(
 
   const stampedPayload = handoff.payload;
 
-  const scanHistoryId = await recordCentralScanEvent({
+  const recorded = await recordCentralScanEvent({
     scan_value: match.scanned,
     scan_context: "carton_identity",
     result: "green",
@@ -447,13 +435,14 @@ export async function processCartonIdentityScan(
     userMessage: getScanUserMessage("carton_identity_verified"),
     syncStatus: "ready_to_submit",
   });
+  if (!recorded.ok) return duplicateScanResult(idempotencyKey);
 
   return {
     ok: true,
     userMessage: getScanUserMessage("carton_identity_verified"),
     messageCode: "carton_identity_verified",
     idempotencyKey,
-    scanHistoryId,
+    scanHistoryId: recorded.scanHistoryId,
     payload: stampedPayload,
     readyForCentral: true,
     centralSyncStatus: "ready_to_submit",
