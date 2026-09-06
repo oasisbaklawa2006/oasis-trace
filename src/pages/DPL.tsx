@@ -15,6 +15,7 @@ import { errorMessage } from "@/lib/utils";
 import { rollupBySku } from "@/lib/piRollup";
 import { resolveDplMemberCartons } from "@/lib/dplMembership";
 import { traceMutations } from "@/lib/traceMutations";
+import { validateDplHandoffBoundary } from "@/lib/packingContract";
 
 export default function DPL() {
   const [orders, setOrders] = useState<OrderCache[]>([]);
@@ -52,6 +53,17 @@ export default function DPL() {
       setDplError(null);
       if (!orderRef) { toast.error("Pick an order"); return; }
       if (cartonsForOrder.length === 0) { toast.error("No packed cartons for this order"); return; }
+      const handoffCheck = validateDplHandoffBoundary(
+        cartons,
+        contents,
+        cartonsForOrder.map(c => c.id),
+        orderRef,
+      );
+      if (!handoffCheck.ok) {
+        setDplError(handoffCheck.message || "DPL handoff rejected");
+        toast.error(handoffCheck.message || "DPL handoff rejected", { description: handoffCheck.details?.join("; ") });
+        return;
+      }
       setIsSubmitting(true);
       const order = orders.find(o => o.order_number === orderRef);
       const totals = cartonsForOrder.reduce((acc, c) => ({
