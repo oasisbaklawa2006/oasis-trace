@@ -1,11 +1,13 @@
 import {
   assertAcceptedHandoverEvidence,
   resolveHandoverEvidence,
+  verifyAcceptedHandoverEvidence,
   type HandoverEvidence,
 } from "@/lib/handoverEvidence";
 import { resolvePriorHandoverChainHash } from "@/lib/handoverChain";
 import { insertIdempotentHandoverAudit } from "@/lib/idempotentAudit";
 import { traceMutations } from "@/lib/traceMutations";
+import { supabaseConfigured } from "@/lib/supabase";
 import type { Carton } from "@/lib/types";
 
 export interface SealCartonInput {
@@ -45,6 +47,13 @@ export async function sealCartonWithHandover(input: SealCartonInput): Promise<Se
     priorHash,
   });
   assertAcceptedHandoverEvidence(evidence);
+
+  if (supabaseConfigured) {
+    const verified = await verifyAcceptedHandoverEvidence(evidence, { priorHash });
+    if (!verified) {
+      throw new Error("Handover evidence rejected: Core verification failed for core_signed_v1 evidence.");
+    }
+  }
 
   const sealed = await traceMutations.finalizeCarton(
     input.carton.id,

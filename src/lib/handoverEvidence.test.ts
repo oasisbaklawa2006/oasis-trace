@@ -112,8 +112,37 @@ describe("handoverEvidence", () => {
 
   it("rejects software_chain evidence in live acceptance guard", async () => {
     supabaseConfigured.value = true;
-    const evidence = await buildHandoverEvidence("packing", "carton", "c-1", "CTN-1", {});
+    const evidence = {
+      version: "1.0" as const,
+      integrityClass: "software_chain_v1" as const,
+      stage: "packing" as const,
+      entityType: "carton",
+      entityId: "c-1",
+      referenceNo: "CTN-1",
+      occurredAt: "2026-09-07T00:00:00.000Z",
+      metadata: {},
+      contentHash: "a",
+      chainHash: "b",
+    };
     expect(() => assertAcceptedHandoverEvidence(evidence)).toThrow(/core_signed_v1/i);
+  });
+
+  it("rejects client evidence construction in live mode", async () => {
+    supabaseConfigured.value = true;
+    await expect(buildHandoverEvidence("packing", "carton", "c-1", "CTN-1", {}))
+      .rejects.toThrow(/resolveHandoverEvidence/i);
+    await expect(verifyHandoverEvidence({
+      version: "1.0",
+      integrityClass: "software_chain_v1",
+      stage: "packing",
+      entityType: "carton",
+      entityId: "c-1",
+      referenceNo: "CTN-1",
+      occurredAt: "2026-09-07T00:00:00.000Z",
+      metadata: {},
+      contentHash: "a",
+      chainHash: "b",
+    })).rejects.toThrow(/verifyAcceptedHandoverEvidence/i);
   });
 
   it("rejects core_signed_v1 without server-bound actor", async () => {

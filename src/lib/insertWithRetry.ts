@@ -11,7 +11,7 @@ const DEFAULT_MAX_ATTEMPTS = 5;
 /**
  * @param table Supabase/demo table name.
  * @param buildRow Builds the row to insert. Called once per attempt so it
- *   must generate a fresh identifier each time (e.g. `num.carton()`), not
+ *   must generate a fresh identifier each time (e.g. `productionNum.carton()`), not
  *   reuse a value computed before the first attempt.
  * @param maxAttempts Hard cap on insert attempts (default 5). Never retries
  *   more than this many times, regardless of error type.

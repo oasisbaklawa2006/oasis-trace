@@ -46,6 +46,12 @@ export async function buildHandoverEvidence(
   metadata: Record<string, unknown>,
   opts?: { actorId?: string; priorHash?: string },
 ): Promise<HandoverEvidence> {
+  if (supabaseConfigured) {
+    throw new Error(
+      "buildHandoverEvidence is demo/preview only when Supabase is configured. "
+      + "Use resolveHandoverEvidence for authoritative handover signing.",
+    );
+  }
   const occurredAt = new Date().toISOString();
   const content = JSON.stringify({
     stage,
@@ -74,11 +80,17 @@ export async function buildHandoverEvidence(
   };
 }
 
-/** Recompute chain hash from evidence fields — verifies software_chain_v1 only. */
+/** Recompute chain hash from evidence fields — demo/preview software_chain_v1 only. */
 export async function verifyHandoverEvidence(
   evidence: HandoverEvidence,
   priorHash?: string,
 ): Promise<boolean> {
+  if (supabaseConfigured) {
+    throw new Error(
+      "verifyHandoverEvidence is demo/preview only when Supabase is configured. "
+      + "Use verifyAcceptedHandoverEvidence for authoritative verification.",
+    );
+  }
   if (evidence.integrityClass !== HANDOVER_INTEGRITY_CLASS) {
     return false;
   }
