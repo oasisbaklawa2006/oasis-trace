@@ -4,7 +4,7 @@
 **Repo:** `oasisbaklawa2006/oasis-trace` (Trace authority)  
 **Contract version:** `1.0` (`PACKING_CARTON_CONTRACT_VERSION`)  
 **Trace main SHA (baseline):** `d61a7916e438f60e7d6dbf9b48af73b1a9e2fc5d` (post Point93 #31 merge)  
-**Point92 branch head (rebased):** `188d9c0e57a4b3a7ccb71ff8c408683880c407f0`  
+**Point92 branch head (rebased):** `9b01a37641f18fdd8e515b75ec185610375de5d9`  
 **Date:** 2026-09-07  
 **Physical packing UAT:** Separate — `PR MERGED != Point92 cleared`
 
