@@ -3,12 +3,23 @@ import { resolvePriorHandoverChainHash } from "./handoverChain";
 
 const { listTable } = vi.hoisted(() => ({ listTable: vi.fn() }));
 
+const supabaseConfigured = vi.hoisted(() => ({ value: false }));
+
 vi.mock("@/lib/data", () => ({
   listTable: (...args: unknown[]) => listTable(...args),
 }));
 
+vi.mock("@/lib/supabase", () => ({
+  get supabaseConfigured() {
+    return supabaseConfigured.value;
+  },
+}));
+
 describe("handoverChain", () => {
-  beforeEach(() => listTable.mockReset());
+  beforeEach(() => {
+    listTable.mockReset();
+    supabaseConfigured.value = false;
+  });
 
   it("returns entity-specific prior chain hash when present", async () => {
     listTable.mockResolvedValue([
@@ -42,5 +53,24 @@ describe("handoverChain", () => {
       { id: "1", entity_type: "carton", entity_id: "c-1", details: { handover_evidence: { chainHash: "older" } } },
     ]);
     expect(await resolvePriorHandoverChainHash("carton", "c-1")).toBe("newest");
+  });
+
+  it("ignores software_chain evidence in live mode", async () => {
+    supabaseConfigured.value = true;
+    listTable.mockResolvedValue([
+      {
+        id: "1",
+        entity_type: "carton",
+        entity_id: "c-1",
+        details: { handover_evidence: { integrityClass: "software_chain_v1", chainHash: "client-only" } },
+      },
+      {
+        id: "2",
+        entity_type: "carton",
+        entity_id: "c-1",
+        details: { handover_evidence: { integrityClass: "core_signed_v1", chainHash: "server-chain" } },
+      },
+    ]);
+    expect(await resolvePriorHandoverChainHash("carton", "c-1")).toBe("server-chain");
   });
 });

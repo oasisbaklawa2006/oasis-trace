@@ -1,6 +1,6 @@
 import { insertRow, invokeTraceMutation, isDuplicateError, listTable } from "@/lib/data";
 import { withAsyncLock } from "@/lib/asyncLock";
-import type { HandoverEvidence } from "@/lib/handoverEvidence";
+import { assertAcceptedHandoverEvidence, type HandoverEvidence } from "@/lib/handoverEvidence";
 import { isRpcNotDeployedError } from "@/lib/rpcErrors";
 import { supabaseConfigured } from "@/lib/supabase";
 
@@ -25,6 +25,7 @@ export async function insertIdempotentHandoverAudit(
   const key = row.details.idempotency_key;
 
   if (supabaseConfigured) {
+    assertAcceptedHandoverEvidence(row.details.handover_evidence);
     try {
       await invokeTraceMutation("trace_insert_handover_audit_v1", {
         p_action: row.action,

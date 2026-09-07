@@ -97,7 +97,13 @@ export async function verifyHandoverEvidence(
 
 /** True only for Core-signed evidence — not client software_chain_v1 hashes. */
 export function isAuthenticatedHandoverEvidence(evidence: HandoverEvidence): boolean {
-  return evidence.integrityClass === HANDOVER_INTEGRITY_AUTHENTICATED;
+  return evidence.integrityClass === HANDOVER_INTEGRITY_AUTHENTICATED
+    && typeof evidence.chainHash === "string"
+    && evidence.chainHash.length > 0
+    && typeof evidence.occurredAt === "string"
+    && evidence.occurredAt.length > 0
+    && typeof evidence.actorId === "string"
+    && evidence.actorId.length > 0;
 }
 
 /** Guard that evidence is software-chain class (not presented as authenticated). */
@@ -152,9 +158,7 @@ export async function resolveHandoverEvidence(
     if (
       evidence
       && typeof evidence === "object"
-      && evidence.integrityClass === HANDOVER_INTEGRITY_AUTHENTICATED
-      && typeof evidence.chainHash === "string"
-      && evidence.chainHash.length > 0
+      && isAuthenticatedHandoverEvidence(evidence)
     ) {
       return evidence;
     }

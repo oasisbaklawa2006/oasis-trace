@@ -111,7 +111,7 @@ export default function ProductionEntry() {
       // command retrievable. This is NOT a physical print — see
       // labelPrintLog.ts header.
       const { copiedToClipboard } = await generateLabelCommandBatch(created.map(label => buildProductionLabelPayload({
-        productName: product?.name, sku: product?.sku, batchNo: form.batch_no,
+        productName: product?.name, sku: product?.sku, batchNo,
         mfgDate: form.mfg_date, shelfLifeDays: form.shelf_life_days,
         netWeight: form.net_weight, grossWeight: form.gross_weight, labelNo: label.label_no,
       })));

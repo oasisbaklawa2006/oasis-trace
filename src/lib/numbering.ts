@@ -9,15 +9,34 @@ import {
   PREVIEW_BARCODE_IDENTITIES,
 } from "@/lib/barcodeIdentity";
 import { allocateProductionIdentity } from "@/lib/productionIdentity";
+import { supabaseConfigured } from "@/lib/supabase";
+
+/** Static preview placeholders — never allocated in configured live mode. */
+const PREVIEW_NUMBERS = {
+  productionLabel: PREVIEW_BARCODE_IDENTITIES.productionLabel,
+  batch: "BAT-PREVIEW-001",
+  carton: PREVIEW_BARCODE_IDENTITIES.cartonLegacy,
+  dpl: "DPL-PREVIEW-001",
+  pi: "PI-PREVIEW-001",
+  shipping: "SHP-PREVIEW-0001",
+} as const;
+
+function previewOrAllocate(
+  kind: Parameters<typeof allocateTraceIdentity>[0],
+  preview: string,
+): string {
+  if (supabaseConfigured) return preview;
+  return allocateTraceIdentity(kind);
+}
 
 /** Demo/preview/tests — not for configured live production writes. */
 export const num = {
-  productionLabel: () => allocateTraceIdentity("production_label"),
-  batch: () => allocateTraceIdentity("batch"),
-  carton: () => allocateTraceIdentity("legacy_carton"),
-  dpl: () => allocateTraceIdentity("dpl"),
-  pi: () => allocateTraceIdentity("pi"),
-  shipping: () => allocateTraceIdentity("shipping"),
+  productionLabel: () => previewOrAllocate("production_label", PREVIEW_NUMBERS.productionLabel),
+  batch: () => previewOrAllocate("batch", PREVIEW_NUMBERS.batch),
+  carton: () => previewOrAllocate("legacy_carton", PREVIEW_NUMBERS.carton),
+  dpl: () => previewOrAllocate("dpl", PREVIEW_NUMBERS.dpl),
+  pi: () => previewOrAllocate("pi", PREVIEW_NUMBERS.pi),
+  shipping: () => previewOrAllocate("shipping", PREVIEW_NUMBERS.shipping),
   qrRef: (shippingNo: string) => deriveShippingQrRef(shippingNo),
 };
 

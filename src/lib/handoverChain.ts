@@ -4,7 +4,11 @@
  * provides deterministic software-chain linking only.
  */
 import { listTable } from "@/lib/data";
-import type { HandoverEvidence } from "@/lib/handoverEvidence";
+import {
+  HANDOVER_INTEGRITY_AUTHENTICATED,
+  type HandoverEvidence,
+} from "@/lib/handoverEvidence";
+import { supabaseConfigured } from "@/lib/supabase";
 
 interface AuditLogRow {
   id: string;
@@ -17,7 +21,11 @@ interface AuditLogRow {
 
 function extractChainHash(details?: Record<string, unknown>): string | undefined {
   const evidence = details?.handover_evidence as HandoverEvidence | undefined;
-  return evidence?.chainHash;
+  if (!evidence?.chainHash) return undefined;
+  if (supabaseConfigured && evidence.integrityClass !== HANDOVER_INTEGRITY_AUTHENTICATED) {
+    return undefined;
+  }
+  return evidence.chainHash;
 }
 
 export interface ResolvePriorHandoverChainHashOpts {

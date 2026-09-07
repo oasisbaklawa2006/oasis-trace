@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CentralPayloadPreview } from "@/components/CentralPayloadPreview";
 import { listTable } from "@/lib/data";
-import { num, productionNum } from "@/lib/numbering";
+import { productionNum } from "@/lib/numbering";
 import { validateBarcodeIdentity } from "@/lib/barcodeIdentity";
 import { buildCartonMetadata, resolveCartonBarcodeDisplay } from "@/lib/barcodeCarton";
 import { supportsCentralBarcode } from "@/lib/scanContract";

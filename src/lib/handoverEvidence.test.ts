@@ -67,6 +67,7 @@ describe("handoverEvidence", () => {
       entityType: "carton",
       entityId: "c-1",
       referenceNo: "CTN-1",
+      actorId: "actor-core-1",
       occurredAt: "2026-09-07T12:00:00.000Z",
       metadata: { labels: 2 },
       contentHash: "signed-content",
@@ -112,5 +113,21 @@ describe("handoverEvidence", () => {
     supabaseConfigured.value = true;
     const evidence = await buildHandoverEvidence("packing", "carton", "c-1", "CTN-1", {});
     expect(() => assertAcceptedHandoverEvidence(evidence)).toThrow(/core_signed_v1/i);
+  });
+
+  it("rejects core_signed_v1 without server-bound actor", async () => {
+    supabaseConfigured.value = true;
+    expect(isAuthenticatedHandoverEvidence({
+      version: "1.0",
+      integrityClass: HANDOVER_INTEGRITY_AUTHENTICATED,
+      stage: "packing",
+      entityType: "carton",
+      entityId: "c-1",
+      referenceNo: "CTN-1",
+      occurredAt: "2026-09-07T12:00:00.000Z",
+      metadata: {},
+      contentHash: "a",
+      chainHash: "b",
+    })).toBe(false);
   });
 });

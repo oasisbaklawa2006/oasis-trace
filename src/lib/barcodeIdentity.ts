@@ -14,6 +14,7 @@ import {
   parseLegacyCartonBarcode,
   supportsCentralBarcode,
 } from "@/lib/scanContract";
+import { supabaseConfigured } from "@/lib/supabase";
 
 /** Trace-owned allocatable identity kinds (excludes derived central carton barcodes). */
 export type TraceAllocatableKind =
@@ -128,6 +129,12 @@ export function allocateTraceIdentity(
   kind: TraceAllocatableKind,
   opts?: { date?: Date; sequence?: number },
 ): string {
+  if (supabaseConfigured && opts?.sequence === undefined && opts?.date === undefined) {
+    throw new Error(
+      "allocateTraceIdentity is demo/preview/tests only when Supabase is configured. "
+      + "Use allocateProductionIdentity for authoritative live allocation.",
+    );
+  }
   const spec = ALLOC_SPECS[kind];
   const seq = opts?.sequence ?? nextSequence(kind, opts?.date);
   const maximum = 10 ** spec.seqDigits - 1;

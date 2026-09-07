@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   allocateTraceIdentity,
   BARCODE_IDENTITY_AUTHORITY_MATRIX,
@@ -13,8 +13,17 @@ import {
   validateBarcodeIdentity,
 } from "./barcodeIdentity";
 
+const supabaseConfigured = vi.hoisted(() => ({ value: false }));
+
+vi.mock("@/lib/supabase", () => ({
+  get supabaseConfigured() {
+    return supabaseConfigured.value;
+  },
+}));
+
 beforeEach(() => {
   resetTraceIdentityCounters();
+  supabaseConfigured.value = false;
 });
 
 describe("allocateTraceIdentity — deterministic monotonic allocation", () => {
@@ -47,6 +56,12 @@ describe("allocateTraceIdentity — deterministic monotonic allocation", () => {
   it("rejects sequence overflow beyond spec width", () => {
     expect(() => allocateTraceIdentity("batch", { date: fixedDate, sequence: 1000 })).toThrow(/out of range/);
     expect(() => allocateTraceIdentity("production_label", { date: fixedDate, sequence: 10000 })).toThrow(/out of range/);
+  });
+
+  it("fails closed for counter-based allocation when Supabase is configured", () => {
+    supabaseConfigured.value = true;
+    expect(() => allocateTraceIdentity("batch")).toThrow(/allocateProductionIdentity/i);
+    expect(allocateTraceIdentity("batch", { date: fixedDate, sequence: 1 })).toBe("BAT-20260906-001");
   });
 });
 
