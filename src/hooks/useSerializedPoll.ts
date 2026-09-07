@@ -5,7 +5,10 @@ import { useEffect, useRef } from "react";
  */
 export function useSerializedPoll(load: () => Promise<void>, intervalMs: number): void {
   const loadRef = useRef(load);
-  loadRef.current = load;
+
+  useEffect(() => {
+    loadRef.current = load;
+  }, [load]);
 
   useEffect(() => {
     let active = true;

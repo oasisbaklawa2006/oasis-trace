@@ -28,4 +28,12 @@ describe("handoverChain", () => {
     ]);
     expect(await resolvePriorHandoverChainHash("carton", "new")).toBe("latest");
   });
+
+  it("selects newest hash from newest-first audit rows", async () => {
+    listTable.mockResolvedValue([
+      { id: "2", entity_type: "carton", entity_id: "c-1", details: { handover_evidence: { chainHash: "newest" } } },
+      { id: "1", entity_type: "carton", entity_id: "c-1", details: { handover_evidence: { chainHash: "older" } } },
+    ]);
+    expect(await resolvePriorHandoverChainHash("carton", "c-1")).toBe("newest");
+  });
 });

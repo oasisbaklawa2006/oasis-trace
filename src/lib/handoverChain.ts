@@ -30,16 +30,15 @@ export async function resolvePriorHandoverChainHash(
 ): Promise<string | undefined> {
   const logs = await listTable<AuditLogRow>("ols_audit_logs", { order: "created_at", limit: 100 });
   if (entityType && entityId) {
-    for (let i = logs.length - 1; i >= 0; i--) {
-      const log = logs[i];
+    for (const log of logs) {
       if (log.entity_type === entityType && log.entity_id === entityId) {
         const hash = extractChainHash(log.details);
         if (hash) return hash;
       }
     }
   }
-  for (let i = logs.length - 1; i >= 0; i--) {
-    const hash = extractChainHash(logs[i].details);
+  for (const log of logs) {
+    const hash = extractChainHash(log.details);
     if (hash) return hash;
   }
   return undefined;

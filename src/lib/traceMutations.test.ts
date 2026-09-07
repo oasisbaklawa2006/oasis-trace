@@ -34,7 +34,34 @@ describe("governed Trace mutation client", () => {
       p_gross_weight: 5.25,
       p_copied_to_clipboard: true,
       p_idempotency_key: "finalize-carton:carton-1",
+      p_handover_evidence: null,
+      p_actor_id: null,
     });
+  });
+
+  it("forwards handover evidence payload to finalize RPC when provided", async () => {
+    invoke.mockResolvedValue({ id: "carton-1", status: "packed" });
+    const evidence = {
+      version: "1.0" as const,
+      integrityClass: "software_chain_v1" as const,
+      stage: "packing" as const,
+      entityType: "carton",
+      entityId: "carton-1",
+      referenceNo: "CTN-1",
+      occurredAt: "2026-09-07T00:00:00.000Z",
+      metadata: {},
+      contentHash: "abc",
+      chainHash: "def",
+    };
+    const { traceMutations } = await import("./traceMutations");
+    await traceMutations.finalizeCarton("carton-1", 5, 5.25, true, "finalize-carton:carton-1", {
+      handoverEvidence: evidence,
+      actorId: "user-1",
+    });
+    expect(invoke).toHaveBeenCalledWith("trace_finalize_carton_v1", expect.objectContaining({
+      p_handover_evidence: evidence,
+      p_actor_id: "user-1",
+    }));
   });
 
   it("routes printer settings saves through Core authority instead of raw ols_printers updates", async () => {

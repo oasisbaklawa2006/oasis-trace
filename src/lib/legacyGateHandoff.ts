@@ -6,6 +6,7 @@
  * Physical scanner UAT remains Leap13.
  */
 import { insertRow, invokeTraceMutation, listTable, updateRow } from "@/lib/data";
+import { isRpcNotDeployedError } from "@/lib/rpcErrors";
 import { supabaseConfigured } from "@/lib/supabase";
 import { buildHandoverEvidence } from "@/lib/handoverEvidence";
 import { resolvePriorHandoverChainHash } from "@/lib/handoverChain";
@@ -126,8 +127,8 @@ export async function executeLegacyGateHandoff(
         });
         await recordGateScan(input.ref, decision);
         return { decision };
-      } catch {
-        // Core RPC not deployed — fall through to guarded client path below.
+      } catch (err: unknown) {
+        if (!isRpcNotDeployedError(err)) throw err;
       }
     }
 

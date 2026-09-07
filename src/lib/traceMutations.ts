@@ -1,4 +1,5 @@
 import { invokeTraceMutation } from "@/lib/data";
+import type { HandoverEvidence } from "@/lib/handoverEvidence";
 import type { Carton, DplDocument, FinancePi, PrinterRow, ProductionBatch, ProductionLabel, ShippingLabelRow } from "@/lib/types";
 
 export interface ProductionMutationResult { batch: ProductionBatch; labels: ProductionLabel[] }
@@ -7,8 +8,29 @@ export interface PiCartonMutationResult { pi: FinancePi; carton: Carton; link_id
 export const traceMutations = {
   createProduction: (input: Record<string, unknown>, labels: Record<string, unknown>[], idempotencyKey: string) =>
     invokeTraceMutation<ProductionMutationResult>("trace_create_production_v1", { p_input: input, p_labels: labels, p_idempotency_key: idempotencyKey }),
-  finalizeCarton: (cartonId: string, net: number, gross: number, copied: boolean, idempotencyKey: string) =>
-    invokeTraceMutation<Carton>("trace_finalize_carton_v1", { p_carton_id: cartonId, p_net_weight: net, p_gross_weight: gross, p_copied_to_clipboard: copied, p_idempotency_key: idempotencyKey }),
+  finalizeCarton: (
+    cartonId: string,
+    net: number,
+    gross: number,
+    copied: boolean,
+    idempotencyKey: string,
+    opts?: { handoverEvidence?: HandoverEvidence; actorId?: string },
+  ) =>
+    invokeTraceMutation<Carton>("trace_finalize_carton_v1", {
+      p_carton_id: cartonId,
+      p_net_weight: net,
+      p_gross_weight: gross,
+      p_copied_to_clipboard: copied,
+      p_idempotency_key: idempotencyKey,
+      p_handover_evidence: opts?.handoverEvidence ?? null,
+      p_actor_id: opts?.actorId ?? null,
+    }),
+  addCartonContent: (cartonId: string, labelId: string, idempotencyKey: string) =>
+    invokeTraceMutation<Carton>("trace_add_carton_content_v1", {
+      p_carton_id: cartonId,
+      p_production_label_id: labelId,
+      p_idempotency_key: idempotencyKey,
+    }),
   createDpl: (input: Record<string, unknown>, cartonIds: string[], idempotencyKey: string) =>
     invokeTraceMutation<{ dpl: DplDocument; links: Array<{ id: string; dpl_id: string; carton_id: string; position: number }> }>("trace_create_dpl_v1", { p_input: input, p_carton_ids: cartonIds, p_idempotency_key: idempotencyKey }),
   addCartonToPi: (cartonId: string, piId: string | null, piNo: string, idempotencyKey: string) =>

@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CentralPayloadPreview } from "@/components/CentralPayloadPreview";
-import { listTable, insertRow } from "@/lib/data";
+import { listTable } from "@/lib/data";
 import { num } from "@/lib/numbering";
 import { validateBarcodeIdentity } from "@/lib/barcodeIdentity";
 import { buildCartonMetadata, resolveCartonBarcodeDisplay } from "@/lib/barcodeCarton";
@@ -26,9 +26,8 @@ import { errorMessage } from "@/lib/utils";
 import { generateLabelCommand, NO_PHYSICAL_PRINT_NOTE } from "@/lib/labelPrintLog";
 import { buildCartonLabelPayload } from "@/lib/labelPayloads";
 import { insertWithUniqueRetry } from "@/lib/insertWithRetry";
-import { traceMutations } from "@/lib/traceMutations";
-import { buildHandoverEvidence } from "@/lib/handoverEvidence";
-import { resolvePriorHandoverChainHash } from "@/lib/handoverChain";
+import { packLabelIntoCarton } from "@/lib/cartonPacking";
+import { sealCartonWithHandover } from "@/lib/cartonSeal";
 import {
   validateAddContent,
   validateCreateCarton,
@@ -100,7 +99,7 @@ export default function Cartonization() {
           customer_code: order?.customer_code,
           customer_name: order?.customer_name,
           status: "draft",
-          carton_index: (recentCartons.filter(r => r.order_ref === orderRef).length) + 1,
+          carton_index: (allCartons.filter(r => r.order_ref === orderRef).length) + 1,
           metadata: buildCartonMetadata(orderRef, legacyNo),
         };
       });
@@ -188,11 +187,7 @@ export default function Cartonization() {
           return;
         }
       }
-      const row = await insertRow<CartonContent>("ols_carton_contents", { carton_id: carton.id, production_label_id: lbl.id });
-      await insertRow("ols_inventory_movements", {
-        production_label_id: lbl.id, from_location: "store", to_location: "packing",
-        movement_type: "carton_pack", reference_no: carton.carton_no,
-      });
+      const { content: row } = await packLabelIntoCarton(carton.id, carton.carton_no, lbl.id);
       setContents(c => [...c, { ...row, label: lbl }]);
       setPacked(p => new Set(p).add(lbl.id));
       setAllContents(prev => [...prev, row]);
@@ -228,18 +223,13 @@ export default function Cartonization() {
         cartonIndex: carton.carton_index, itemCount: contents.length,
         netWeightKg: net, barcode: barcodeDisplay?.labelBarcode || carton.carton_no,
       }));
-      const priorHash = await resolvePriorHandoverChainHash("carton", carton.id);
-      const evidence = await buildHandoverEvidence(
-        "packing", "carton", carton.id, carton.carton_no,
-        { order_ref: carton.order_ref, label_count: contents.length, net, gross },
-        { actorId: session?.user?.id, priorHash },
-      );
-      await traceMutations.finalizeCarton(
-        carton.id, net, gross, copiedToClipboard, `finalize-carton:${carton.id}`,
-      );
-      await insertRow("ols_audit_logs", {
-        action: "carton_sealed", entity_type: "carton", entity_id: carton.id,
-        details: { carton_no: carton.carton_no, handover_evidence: evidence, idempotency_key: `finalize-carton:${carton.id}` },
+      await sealCartonWithHandover({
+        carton,
+        net,
+        gross,
+        copiedToClipboard,
+        labelCount: contents.length,
+        actorId: session?.user?.id,
       });
       toast.success("Carton packed — label command generated", { description: NO_PHYSICAL_PRINT_NOTE });
       setCarton(null); setContents([]); setIdentityResult(null);
