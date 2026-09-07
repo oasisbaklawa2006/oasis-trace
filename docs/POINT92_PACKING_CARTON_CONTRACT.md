@@ -3,8 +3,9 @@
 **ASM:** Central #459 defines Point 92 = packing / cartons canonical Trace contract.  
 **Repo:** `oasisbaklawa2006/oasis-trace` (Trace authority)  
 **Contract version:** `1.0` (`PACKING_CARTON_CONTRACT_VERSION`)  
-**Trace main SHA (baseline):** `a5c347311325607a0a82b1ffe6f76ffd0b44ce1f`  
-**Date:** 2026-09-06  
+**Trace main SHA (baseline):** `d61a7916e438f60e7d6dbf9b48af73b1a9e2fc5d` (post Point93 #31 merge)  
+**Point92 branch head (rebased):** `188d9c0e57a4b3a7ccb71ff8c408683880c407f0`  
+**Date:** 2026-09-07  
 **Physical packing UAT:** Separate — `PR MERGED != Point92 cleared`
 
 ---
