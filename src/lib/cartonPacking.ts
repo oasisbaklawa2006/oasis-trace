@@ -1,5 +1,7 @@
 import { insertRow, listTable } from "@/lib/data";
+import { withAsyncLock } from "@/lib/asyncLock";
 import { isRpcNotDeployedError } from "@/lib/rpcErrors";
+import { demo } from "@/lib/demoStore";
 import { supabaseConfigured } from "@/lib/supabase";
 import { traceMutations } from "@/lib/traceMutations";
 import type { CartonContent } from "@/lib/types";
@@ -59,14 +61,15 @@ async function demoPackLabelIntoCarton(
       metadata: { idempotency_key: idempotencyKey },
     });
   } catch (err: unknown) {
-    if (!hasMovement) throw err;
+    if (row.id) demo.remove("ols_carton_contents", row.id);
+    throw err;
   }
   return { content: row, idempotencyKey };
 }
 
 /**
- * Governed carton-content pack — prefers Core RPC; demo uses idempotent
- * sequential writes with shared idempotency key embedded in movement metadata.
+ * Governed carton-content pack — prefers Core RPC; demo uses serialized,
+ * idempotent sequential writes with shared idempotency key metadata.
  */
 export async function packLabelIntoCarton(
   cartonId: string,
@@ -81,8 +84,14 @@ export async function packLabelIntoCarton(
       return { content, idempotencyKey };
     } catch (err: unknown) {
       if (!isRpcNotDeployedError(err)) throw err;
+      throw new Error(
+        "Trace operation rejected: trace_add_carton_content_v1 is not deployed. "
+        + "Deploy Core macro #557 before packing in live mode.",
+      );
     }
   }
 
-  return demoPackLabelIntoCarton(cartonId, cartonNo, labelId, idempotencyKey);
+  return withAsyncLock(idempotencyKey, () =>
+    demoPackLabelIntoCarton(cartonId, cartonNo, labelId, idempotencyKey),
+  );
 }

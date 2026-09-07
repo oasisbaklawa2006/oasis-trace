@@ -18,6 +18,7 @@ import type { CentralSubmitResult } from "@/lib/centralSubmit";
 import type { CentralScanSyncStatus } from "@/lib/centralScanStatus";
 import type { Carton, FinancePi, GateScanRow, OrderCache, ShippingLabelRow } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
+import { captureLeap13Evidence } from "@/lib/leap13Evidence";
 
 export default function GateScan() {
   const [labels, setLabels] = useState<ShippingLabelRow[]>([]);
@@ -72,6 +73,12 @@ export default function GateScan() {
           feedback("error");
           toast.error(flow.userMessage);
         }
+        captureLeap13Evidence("gate-handheld", "central-scan", {
+          ref,
+          ok: flow.ok,
+          duplicate: flow.duplicate,
+          idempotencyKey: flow.idempotencyKey,
+        });
         reload();
         return;
       }
@@ -96,6 +103,11 @@ export default function GateScan() {
         else feedback(res.kind === "green" ? "ok" : (res.title === "DUPLICATE" ? "dup" : "error"));
         setLegacyResult(res);
         setCtnResult(null);
+        captureLeap13Evidence("gate-handheld", "legacy-scan", {
+          ref,
+          result: res.kind,
+          duplicateDispatch,
+        });
       });
       reload();
     } catch (err: unknown) {

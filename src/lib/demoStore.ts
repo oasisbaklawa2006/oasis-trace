@@ -120,6 +120,14 @@ export const demo = {
     save(db);
     return arr[i] as T;
   },
+  remove(table: string, id: string): boolean {
+    const arr = db[table] || [];
+    const i = arr.findIndex(r => r.id === id);
+    if (i === -1) return false;
+    arr.splice(i, 1);
+    save(db);
+    return true;
+  },
   reset() { db = seed(); save(db); },
 };
 

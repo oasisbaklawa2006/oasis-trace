@@ -25,4 +25,14 @@ describe("countTable demo mode", () => {
     expect(await count("ols_cartons", { column: "status", op: "eq", value: "dispatched" })).toBe(1);
     expect(await count("ols_shipping_labels", { column: "status", op: "neq", value: "dispatched" })).toBe(1);
   });
+
+  it("excludes nullish values for neq filters (Supabase parity)", async () => {
+    const { demo } = await import("./demoStore");
+    demo.insert("ols_shipping_labels", { status: null });
+    demo.insert("ols_shipping_labels", { status: "active" });
+    demo.insert("ols_shipping_labels", {});
+
+    const { countTable: count } = await import("./data");
+    expect(await count("ols_shipping_labels", { column: "status", op: "neq", value: "dispatched" })).toBe(1);
+  });
 });

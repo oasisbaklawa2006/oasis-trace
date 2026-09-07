@@ -1,6 +1,8 @@
 import { useCallback, useState } from "react";
-import { countTable, listTable } from "@/lib/data";
+import { captureLeap13Evidence } from "@/lib/leap13Evidence";
+import { countTable, getMode, listTable } from "@/lib/data";
 import { useSerializedPoll } from "@/hooks/useSerializedPoll";
+import { supabaseConfigured } from "@/lib/supabase";
 import type { Carton } from "@/lib/types";
 import { PackageCheck, Truck } from "lucide-react";
 
@@ -13,18 +15,32 @@ export default function TvDispatch() {
   const [packed, setPacked] = useState(0);
   const [dispatched, setDispatched] = useState(0);
   const [shippingReady, setShippingReady] = useState(0);
+  const [dataSource, setDataSource] = useState<"live" | "demo">("demo");
 
   const load = useCallback(async () => {
-    const [packedCount, dispatchedCount, shippingReadyCount, recentCartons] = await Promise.all([
-      countTable("ols_cartons", { column: "status", op: "in", value: ["packed", "finance_received"] }),
-      countTable("ols_cartons", { column: "status", op: "eq", value: "dispatched" }),
-      countTable("ols_shipping_labels", { column: "status", op: "neq", value: "dispatched" }),
-      listTable<Carton>("ols_cartons", { order: "created_at", limit: DETAIL_LIMIT }),
-    ]);
-    setPacked(packedCount);
-    setDispatched(dispatchedCount);
-    setShippingReady(shippingReadyCount);
-    setDetailCartons(recentCartons);
+    try {
+      const [packedCount, dispatchedCount, shippingReadyCount, recentCartons] = await Promise.all([
+        countTable("ols_cartons", { column: "status", op: "in", value: ["packed", "finance_received"] }),
+        countTable("ols_cartons", { column: "status", op: "eq", value: "dispatched" }),
+        countTable("ols_shipping_labels", { column: "status", op: "neq", value: "dispatched" }),
+        listTable<Carton>("ols_cartons", { order: "created_at", limit: DETAIL_LIMIT }),
+      ]);
+      if (supabaseConfigured && getMode() !== "live") return;
+      setPacked(packedCount);
+      setDispatched(dispatchedCount);
+      setShippingReady(shippingReadyCount);
+      setDetailCartons(recentCartons);
+      setDataSource(supabaseConfigured ? "live" : "demo");
+      captureLeap13Evidence("tv-dispatch", "refresh", {
+        packed: packedCount,
+        dispatched: dispatchedCount,
+        shippingReady: shippingReadyCount,
+        detailRows: recentCartons.length,
+        dataSource: supabaseConfigured ? "live" : "demo",
+      });
+    } catch {
+      // Discard partial refresh — do not commit mixed-source kiosk state.
+    }
   }, []);
 
   useSerializedPoll(load, REFRESH_MS);
@@ -33,7 +49,7 @@ export default function TvDispatch() {
     <div className="min-h-screen bg-background p-6 tv-surface">
       <header className="mb-6">
         <p className="text-sm font-semibold tracking-[0.2em] text-muted-foreground">OASIS TRACE</p>
-        <h1 className="text-4xl font-bold">Dispatch — Live</h1>
+        <h1 className="text-4xl font-bold">Dispatch — {dataSource === "live" ? "Live" : "Demo"}</h1>
       </header>
 
       <div className="mb-8 grid gap-4 md:grid-cols-3">

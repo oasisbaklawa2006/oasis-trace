@@ -34,6 +34,11 @@ export function subscribeMode(l: ModeListener): () => void {
 export function getMode() { return currentMode; }
 export function getLastError() { return lastError; }
 
+/** True when reads/writes target live Supabase (not demo fallback). */
+export function isAuthoritativeLiveSource(): boolean {
+  return supabaseConfigured && getMode() === "live";
+}
+
 // ---------- Online/offline ----------
 type OnlineListener = (online: boolean) => void;
 const onlineListeners = new Set<OnlineListener>();
@@ -136,12 +141,20 @@ export async function countTable(table: string, filters?: CountFilter | CountFil
       });
       setMode("live");
       return count;
-    } catch (e: unknown) { setMode("demo", errorMessage(e)); }
+    } catch (e: unknown) {
+      console.error(`[ols] count ${table} failed in live mode:`, errorMessage(e));
+      throw new Error(`Cannot read count from database: ${errorMessage(e)}`);
+    }
   }
   let rows = demo.all(table);
   for (const f of normalized) {
     if (f.op === "eq") rows = rows.filter(r => r[f.column] === f.value);
-    else if (f.op === "neq") rows = rows.filter(r => r[f.column] !== f.value);
+    else if (f.op === "neq") {
+      rows = rows.filter(r => {
+        const v = r[f.column];
+        return v != null && v !== f.value;
+      });
+    }
     else rows = rows.filter(r => (f.value as unknown[]).includes(r[f.column]));
   }
   return rows.length;

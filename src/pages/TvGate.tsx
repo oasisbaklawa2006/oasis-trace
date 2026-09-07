@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import { captureLeap13Evidence } from "@/lib/leap13Evidence";
 import { listTable } from "@/lib/data";
 import { useSerializedPoll } from "@/hooks/useSerializedPoll";
 import type { GateScanRow } from "@/lib/types";
@@ -15,6 +16,10 @@ export default function TvGate() {
     const rows = await listTable<GateScanRow>("ols_gate_scans", { order: "scanned_at", limit: 20 });
     setHistory(rows);
     setLatest(rows[0] ?? null);
+    captureLeap13Evidence("tv-gate", "refresh", {
+      rows: rows.length,
+      latestResult: rows[0]?.result ?? null,
+    });
   }, []);
 
   useSerializedPoll(load, REFRESH_MS);
