@@ -52,7 +52,7 @@ export default function ShippingLabel() {
         );
       }
       const pi = matchingClearedPis[0];
-      // shipping_no and qr_ref are both randomly generated (numbering.ts)
+      // shipping_no and qr_ref are Trace-allocated (barcodeIdentity.ts)
       // and unique — retry with fresh ids on a confirmed unique-constraint
       // violation, bounded.
       const shippingNo = num.shipping();
@@ -64,7 +64,7 @@ export default function ShippingLabel() {
         consignee: carton.customer_name,
         address: "—",
         invoice_ref: pi.invoice_ref,
-        qr_ref: num.qrRef(),
+        qr_ref: num.qrRef(shippingNo),
         // "generated" (not "printed") — no print transport exists yet, see
         // labelPrintLog.ts. This status is otherwise only compared against
         // "dispatched" downstream (GateScan), so this rename is safe.

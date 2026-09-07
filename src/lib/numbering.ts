@@ -1,21 +1,23 @@
-// Human-readable number generators. Format: PREFIX-YYYYMMDD-####
-function ymd(d = new Date()) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}${m}${day}`;
-}
-function rand(n = 4) {
-  return Math.floor(Math.random() * 10 ** n)
-    .toString()
-    .padStart(n, "0");
-}
+/**
+ * Human-readable Trace identifiers — delegates to barcodeIdentity (Point 94).
+ * Preview fixtures remain available for non-authoritative UI only.
+ */
+import {
+  allocateTraceIdentity,
+  deriveShippingQrRef,
+  PREVIEW_BARCODE_IDENTITIES,
+} from "@/lib/barcodeIdentity";
+
 export const num = {
-  productionLabel: () => `PL-${ymd()}-${rand(4)}`,
-  batch: () => `BAT-${ymd()}-${rand(3)}`,
-  carton: () => `CTN-${ymd()}-${rand(4)}`,
-  dpl: () => `DPL-${ymd()}-${rand(3)}`,
-  pi: () => `PI-${ymd()}-${rand(3)}`,
-  shipping: () => `SHP-${ymd()}-${rand(4)}`,
-  qrRef: () => `QR-${crypto.randomUUID().slice(0, 12).toUpperCase()}`,
+  productionLabel: () => allocateTraceIdentity("production_label"),
+  batch: () => allocateTraceIdentity("batch"),
+  carton: () => allocateTraceIdentity("legacy_carton"),
+  dpl: () => allocateTraceIdentity("dpl"),
+  pi: () => allocateTraceIdentity("pi"),
+  shipping: () => allocateTraceIdentity("shipping"),
+  /** Deterministic QR from shipping_no — call after shipping_no is known. */
+  qrRef: (shippingNo: string) => deriveShippingQrRef(shippingNo),
 };
+
+/** Explicit preview fixtures for templates/UI — not for production allocation. */
+export const previewIds = PREVIEW_BARCODE_IDENTITIES;

@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { CentralPayloadPreview } from "@/components/CentralPayloadPreview";
 import { listTable, insertRow } from "@/lib/data";
 import { num } from "@/lib/numbering";
+import { validateBarcodeIdentity } from "@/lib/barcodeIdentity";
 import { buildCartonMetadata, resolveCartonBarcodeDisplay } from "@/lib/barcodeCarton";
 import { supportsCentralBarcode } from "@/lib/scanContract";
 import { processCartonIdentityScan, type ScanFlowResult } from "@/lib/scanService";
@@ -86,7 +87,7 @@ export default function Cartonization() {
         toast.error(createCheck.message || "Failed to create carton", { duration: Infinity });
         return;
       }
-      // carton_no is randomly generated (numbering.ts) and can collide under
+      // carton_no is Trace-allocated (barcodeIdentity.ts) and can collide under
       // concurrent multi-terminal use — retry with a fresh id (and matching
       // metadata) on a confirmed unique-constraint violation, bounded.
       const c = await insertWithUniqueRetry<Carton>("ols_cartons", () => {
@@ -149,7 +150,13 @@ export default function Cartonization() {
       setCartonError(null);
       const code = scanInput.trim();
       if (!code || !carton) return;
-      const lbl = labels.find(l => l.label_no === code);
+      const plCheck = validateBarcodeIdentity(code, { expectedKind: "production_label" });
+      if (plCheck.ok === false) {
+        feedback("error");
+        toast.error("Invalid production label barcode", { description: plCheck.message });
+        return;
+      }
+      const lbl = labels.find(l => l.label_no === plCheck.normalized);
       if (!lbl) { feedback("error"); toast.error("Label not found", { description: "Use manual add if needed." }); return; }
       const addCheck = validateAddContent({
         carton,
