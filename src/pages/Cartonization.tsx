@@ -27,6 +27,7 @@ import { generateLabelCommand, NO_PHYSICAL_PRINT_NOTE } from "@/lib/labelPrintLo
 import { buildCartonLabelPayload } from "@/lib/labelPayloads";
 import { insertWithUniqueRetry } from "@/lib/insertWithRetry";
 import { traceMutations } from "@/lib/traceMutations";
+import { buildHandoverEvidence } from "@/lib/handoverEvidence";
 import {
   validateAddContent,
   validateCreateCarton,
@@ -229,6 +230,15 @@ export default function Cartonization() {
       await traceMutations.finalizeCarton(
         carton.id, net, gross, copiedToClipboard, `finalize-carton:${carton.id}`,
       );
+      const evidence = await buildHandoverEvidence(
+        "packing", "carton", carton.id, carton.carton_no,
+        { order_ref: carton.order_ref, label_count: contents.length, net, gross },
+        { actorId: session?.user?.id },
+      );
+      await insertRow("ols_audit_logs", {
+        action: "carton_sealed", entity_type: "carton", entity_id: carton.id,
+        details: { carton_no: carton.carton_no, handover_evidence: evidence },
+      });
       toast.success("Carton packed — label command generated", { description: NO_PHYSICAL_PRINT_NOTE });
       setCarton(null); setContents([]); setIdentityResult(null);
       const allC = await listTable<Carton>("ols_cartons");

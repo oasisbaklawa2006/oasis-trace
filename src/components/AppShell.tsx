@@ -29,6 +29,8 @@ const NAV = [
   { to: "/dispatch", label: "Dispatch Bundle", icon: Truck, group: "Dispatch" },
   { to: "/shipping", label: "Shipping Labels", icon: Tag, group: "Dispatch" },
   { to: "/gate", label: "Gate Scan", icon: ShieldCheck, group: "Security" },
+  { to: "/tv/gate", label: "Gate TV", icon: ShieldCheck, group: "TV" },
+  { to: "/tv/dispatch", label: "Dispatch TV", icon: Truck, group: "TV" },
   { to: "/trace", label: "Traceability", icon: Search, group: "Operations" },
   { to: "/print-logs", label: "Print Logs", icon: History, group: "Operations" },
   { to: "/reprints", label: "Reprint Requests", icon: RotateCcw, group: "Operations" },

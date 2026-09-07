@@ -2,21 +2,7 @@
 // Enter-to-submit, debounced duplicate suppression, configurable cooldown
 // between scans, and optional batch/rapid-pack buffering.
 //
-// This hook is not currently wired into any screen — GateScan.tsx,
-// Cartonization.tsx and FinancePI.tsx each use a simpler inline
-// onKeyDown-Enter pattern. It's kept available (not dead code to delete)
-// because it materially improves on that pattern — real autofocus
-// recovery and duplicate-scan suppression that today rely entirely on
-// backend/service-layer idempotency checks — but wiring it into the
-// existing, already-tested scan screens was left out of this pass to
-// avoid UI regression risk without a way to manually verify hardware
-// scanner behavior in this environment. See the Trace forensic audit for
-// this decision.
-//
-// A previous version of this file also exported camera-torch helpers
-// (isTorchSupported/setTorch) for a camera-based scanning mode. That mode
-// was never built and is explicitly out of scope (keyboard-wedge/manual
-// entry is the approved architecture) — removed as genuinely dead code.
+// Wired into GateScan (handheld/mobile gate) for dedup, cooldown, and autofocus.
 import { useCallback, useEffect, useRef, useState } from "react";
 
 export type ScanMode = "single" | "batch" | "rapid-pack";

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,21 +6,20 @@ import { CentralPayloadPreview } from "@/components/CentralPayloadPreview";
 import { listTable, insertRow, updateRow } from "@/lib/data";
 import { classifyCartonBarcode } from "@/lib/scanContract";
 import { processDispatchGateCtnSoScan, resolveLegacyGateDecision, type ScanFlowResult, type LegacyGateResult } from "@/lib/scanService";
+import { buildHandoverEvidence } from "@/lib/handoverEvidence";
 import { ShieldCheck, ShieldAlert, ScanLine, Volume2, VolumeX } from "lucide-react";
 import { feedback, isFeedbackEnabled, setFeedbackEnabled } from "@/lib/scanFeedback";
 import { toast } from "sonner";
 import { useOlsSession } from "@/hooks/useOlsSession";
 import { usePendingCentralSubmitSync } from "@/hooks/usePendingCentralSubmitSync";
-import {
-  submitWithOfflineRetry,
-} from "@/lib/scanSubmitQueue";
+import { useScanLoop } from "@/hooks/useScanLoop";
+import { submitWithOfflineRetry } from "@/lib/scanSubmitQueue";
 import type { CentralSubmitResult } from "@/lib/centralSubmit";
 import type { CentralScanSyncStatus } from "@/lib/centralScanStatus";
 import type { Carton, FinancePi, GateScanRow, OrderCache, ShippingLabelRow } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
 
 export default function GateScan() {
-  const [scan, setScan] = useState("");
   const [labels, setLabels] = useState<ShippingLabelRow[]>([]);
   const [cartons, setCartons] = useState<Carton[]>([]);
   const [pis, setPis] = useState<FinancePi[]>([]);
@@ -32,11 +31,9 @@ export default function GateScan() {
   const [submitting, setSubmitting] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const { session, canSubmitCentral } = useOlsSession();
-  const inputRef = useRef<HTMLInputElement>(null);
 
   usePendingCentralSubmitSync(ctnResult?.idempotencyKey, setSubmitResult);
 
-  useEffect(() => { reload(); inputRef.current?.focus(); }, []);
   async function reload() {
     setLabels(await listTable<ShippingLabelRow>("ols_shipping_labels"));
     setCartons(await listTable<Carton>("ols_cartons"));
@@ -45,49 +42,48 @@ export default function GateScan() {
     setHistory(await listTable<GateScanRow>("ols_gate_scans", { order: "scanned_at", limit: 10 }));
   }
 
-  async function checkLegacyShipping(ref: string) {
-    try {
-      setScanError(null);
-      const { result: res, label: lbl, carton: ctn } = resolveLegacyGateDecision(ref, { shippingLabels: labels, cartons, pis });
-      if (res.kind === "green" && ctn && lbl) {
-        await updateRow("ols_cartons", ctn.id, { status: "dispatched" });
-        await updateRow("ols_shipping_labels", lbl.id, { status: "dispatched" });
-        await insertRow("ols_inventory_movements", {
-          production_label_id: null, from_location: "shipping", to_location: "dispatched",
-          movement_type: "gate_clear", reference_no: ctn.carton_no,
-        });
-        await insertRow("ols_audit_logs", {
-          action: "gate_dispatched", entity_type: "shipping_label", entity_id: lbl.id,
-          details: { carton_no: ctn.carton_no, shipping_no: lbl.shipping_no, qr_ref: ref },
-        });
-      }
-      await insertRow("ols_gate_scans", { qr_ref: ref, shipping_label_id: lbl?.id, result: res.kind, reason: res.reason });
-      await insertRow("ols_scan_history", {
-        scan_value: ref, scan_context: "gate_shipping_qr", result: res.kind,
-        metadata: { reason: res.reason || null, legacy_flow: true },
-      });
-      if (res.kind === "red") {
-        await insertRow("ols_audit_logs", {
-          action: "gate_hold", entity_type: "shipping_label", entity_id: lbl?.id,
-          details: { qr_ref: ref, reason: res.reason },
-        });
-      }
-      feedback(res.kind === "green" ? "ok" : (res.title === "DUPLICATE" ? "dup" : "error"));
-      setLegacyResult(res);
-      setCtnResult(null);
-    } catch (err: unknown) {
-      const msg = errorMessage(err, "Failed to record scan");
-      setScanError(msg);
-      toast.error(msg, { duration: Infinity });
-      feedback("error");
-      throw err;
-    }
-  }
+  useEffect(() => { reload(); }, []);
 
-  async function check() {
+  const checkLegacyShipping = useCallback(async (ref: string) => {
+    setScanError(null);
+    const { result: res, label: lbl, carton: ctn } = resolveLegacyGateDecision(ref, { shippingLabels: labels, cartons, pis });
+    if (res.kind === "green" && ctn && lbl) {
+      await updateRow("ols_cartons", ctn.id, { status: "dispatched" });
+      await updateRow("ols_shipping_labels", lbl.id, { status: "dispatched" });
+      await insertRow("ols_inventory_movements", {
+        production_label_id: null, from_location: "shipping", to_location: "dispatched",
+        movement_type: "gate_clear", reference_no: ctn.carton_no,
+      });
+      const evidence = await buildHandoverEvidence(
+        "gate", "shipping_label", lbl.id, ctn.carton_no,
+        { shipping_no: lbl.shipping_no, qr_ref: ref, result: "green" },
+        { actorId: session?.user?.id },
+      );
+      await insertRow("ols_audit_logs", {
+        action: "gate_dispatched", entity_type: "shipping_label", entity_id: lbl.id,
+        details: { carton_no: ctn.carton_no, shipping_no: lbl.shipping_no, qr_ref: ref, handover_evidence: evidence },
+      });
+    }
+    await insertRow("ols_gate_scans", { qr_ref: ref, shipping_label_id: lbl?.id, result: res.kind, reason: res.reason });
+    await insertRow("ols_scan_history", {
+      scan_value: ref, scan_context: "gate_shipping_qr", result: res.kind,
+      metadata: { reason: res.reason || null, legacy_flow: true },
+    });
+    if (res.kind === "red") {
+      await insertRow("ols_audit_logs", {
+        action: "gate_hold", entity_type: "shipping_label", entity_id: lbl?.id,
+        details: { qr_ref: ref, reason: res.reason },
+      });
+    }
+    feedback(res.kind === "green" ? "ok" : (res.title === "DUPLICATE" ? "dup" : "error"));
+    setLegacyResult(res);
+    setCtnResult(null);
+  }, [labels, cartons, pis, session?.user?.id]);
+
+  const processScan = useCallback(async (raw: string) => {
     try {
       setScanError(null);
-      const ref = scan.trim();
+      const ref = raw.trim();
       if (!ref) return;
 
       const kind = classifyCartonBarcode(ref);
@@ -109,9 +105,7 @@ export default function GateScan() {
           feedback("error");
           toast.error(flow.userMessage);
         }
-        setScan("");
         reload();
-        inputRef.current?.focus();
         return;
       }
 
@@ -120,23 +114,25 @@ export default function GateScan() {
         toast.error("Barcode format invalid", {
           description: "Legacy CTN-YYYYMMDD barcodes use shipping QR at gate. Scan CTN-SO-* for Central gate check.",
         });
-        setScan("");
-        inputRef.current?.focus();
         return;
       }
 
-      // Shipping QR / other refs — legacy gate flow
       await checkLegacyShipping(ref);
-      setScan("");
       reload();
-      inputRef.current?.focus();
     } catch (err: unknown) {
       const msg = errorMessage(err, "Scan failed");
       setScanError(msg);
       toast.error(msg, { duration: Infinity });
+      feedback("error");
     }
-  }
+  }, [orders, labels, cartons, checkLegacyShipping]);
 
+  const { ref: inputRef, value: scan, setValue: setScan, handleKey, submit } = useScanLoop({
+    onScan: processScan,
+    dedupMs: 300,
+    cooldownMs: fastScanCooldown(),
+    refocusMs: 100,
+  });
 
   const syncStatus: CentralScanSyncStatus =
     submitResult?.status ?? ctnResult?.centralSyncStatus ?? "preview_only";
@@ -192,12 +188,12 @@ export default function GateScan() {
           <div className="flex gap-2">
             <Input
               ref={inputRef} value={scan} onChange={e => setScan(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && check()}
+              onKeyDown={handleKey}
               placeholder="Scan CTN-SO-* or shipping QR…"
               aria-label="Gate scan barcode input"
               className="h-14 font-mono text-lg"
             />
-            <Button onClick={check} className="h-14 px-6 bg-gradient-primary text-primary-foreground"><ScanLine size={20} /></Button>
+            <Button onClick={() => submit()} className="h-14 px-6 bg-gradient-primary text-primary-foreground"><ScanLine size={20} /></Button>
             <Button variant="outline" className="h-14 px-3" onClick={() => { setFeedbackEnabled(!isFeedbackEnabled()); location.reload(); }} title="Toggle scan beep + vibration">
               {isFeedbackEnabled() ? <Volume2 size={18} /> : <VolumeX size={18} />}
             </Button>
@@ -278,4 +274,9 @@ export default function GateScan() {
       </div>
     </div>
   );
+}
+
+function fastScanCooldown(): number {
+  if (typeof window === "undefined") return 0;
+  return window.matchMedia("(max-width: 640px)").matches ? 150 : 0;
 }

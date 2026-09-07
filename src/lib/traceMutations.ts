@@ -22,4 +22,9 @@ export const traceMutations = {
       p_printer_id: printerId,
       p_settings: settings,
     }),
+  reconcileExternalRefs: () =>
+    invokeTraceMutation<{ bindings?: Array<{ cache_id: string; external_ref: string }>; applied?: number }>(
+      "trace_reconcile_external_refs_v1",
+      {},
+    ),
 };
