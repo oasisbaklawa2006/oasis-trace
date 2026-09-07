@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
-import { listTable } from "@/lib/data";
+import { countTable, listTable } from "@/lib/data";
 import { useSerializedPoll } from "@/hooks/useSerializedPoll";
-import type { Carton, ShippingLabelRow } from "@/lib/types";
+import type { Carton } from "@/lib/types";
 import { PackageCheck, Truck } from "lucide-react";
 
 const REFRESH_MS = 10_000;
@@ -10,25 +10,24 @@ const DETAIL_LIMIT = 12;
 /** Read-only dispatch kiosk surface — Trace TV role. */
 export default function TvDispatch() {
   const [detailCartons, setDetailCartons] = useState<Carton[]>([]);
-  const [summaryCartons, setSummaryCartons] = useState<Carton[]>([]);
-  const [summaryLabels, setSummaryLabels] = useState<ShippingLabelRow[]>([]);
+  const [packed, setPacked] = useState(0);
+  const [dispatched, setDispatched] = useState(0);
+  const [shippingReady, setShippingReady] = useState(0);
 
   const load = useCallback(async () => {
-    const [allCartons, recentCartons, allLabels] = await Promise.all([
-      listTable<Carton>("ols_cartons", { order: "created_at" }),
+    const [packedCount, dispatchedCount, shippingReadyCount, recentCartons] = await Promise.all([
+      countTable("ols_cartons", { column: "status", op: "in", value: ["packed", "finance_received"] }),
+      countTable("ols_cartons", { column: "status", op: "eq", value: "dispatched" }),
+      countTable("ols_shipping_labels", { column: "status", op: "neq", value: "dispatched" }),
       listTable<Carton>("ols_cartons", { order: "created_at", limit: DETAIL_LIMIT }),
-      listTable<ShippingLabelRow>("ols_shipping_labels", { order: "created_at" }),
     ]);
-    setSummaryCartons(allCartons);
-    setSummaryLabels(allLabels);
+    setPacked(packedCount);
+    setDispatched(dispatchedCount);
+    setShippingReady(shippingReadyCount);
     setDetailCartons(recentCartons);
   }, []);
 
   useSerializedPoll(load, REFRESH_MS);
-
-  const packed = summaryCartons.filter(c => c.status === "packed" || c.status === "finance_received").length;
-  const dispatched = summaryCartons.filter(c => c.status === "dispatched").length;
-  const shippingReady = summaryLabels.filter(l => l.status !== "dispatched").length;
 
   return (
     <div className="min-h-screen bg-background p-6 tv-surface">

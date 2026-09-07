@@ -82,8 +82,19 @@ function seed(): DB {
 let db: DB = load();
 
 export const demo = {
-  list<T = Row>(table: string): T[] {
-    return ((db[table] || []) as T[]).slice().reverse();
+  list<T = Row>(table: string, opts?: { order?: string; limit?: number }): T[] {
+    let rows = ((db[table] || []) as T[]).slice();
+    if (opts?.order) {
+      rows.sort((a, b) => {
+        const av = String((a as Row)[opts.order!] ?? "");
+        const bv = String((b as Row)[opts.order!] ?? "");
+        return bv.localeCompare(av);
+      });
+    } else {
+      rows.reverse();
+    }
+    if (opts?.limit) rows = rows.slice(0, opts.limit);
+    return rows;
   },
   all<T = Row>(table: string): T[] {
     return (db[table] || []) as T[];

@@ -29,6 +29,13 @@ describe("handoverChain", () => {
     expect(await resolvePriorHandoverChainHash("carton", "new")).toBe("latest");
   });
 
+  it("returns undefined for scoped-only lookup when entity has no prior record", async () => {
+    listTable.mockResolvedValue([
+      { id: "1", details: { handover_evidence: { chainHash: "latest" } } },
+    ]);
+    expect(await resolvePriorHandoverChainHash("carton", "new", { scopedOnly: true })).toBeUndefined();
+  });
+
   it("selects newest hash from newest-first audit rows", async () => {
     listTable.mockResolvedValue([
       { id: "2", entity_type: "carton", entity_id: "c-1", details: { handover_evidence: { chainHash: "newest" } } },

@@ -26,6 +26,7 @@ import { errorMessage } from "@/lib/utils";
 import { generateLabelCommand, NO_PHYSICAL_PRINT_NOTE } from "@/lib/labelPrintLog";
 import { buildCartonLabelPayload } from "@/lib/labelPayloads";
 import { insertWithUniqueRetry } from "@/lib/insertWithRetry";
+import { allocateNextCartonIndex } from "@/lib/cartonIndex";
 import { packLabelIntoCarton } from "@/lib/cartonPacking";
 import { sealCartonWithHandover } from "@/lib/cartonSeal";
 import {
@@ -91,18 +92,20 @@ export default function Cartonization() {
       // carton_no is Trace-allocated (barcodeIdentity.ts) and can collide under
       // concurrent multi-terminal use — retry with a fresh id (and matching
       // metadata) on a confirmed unique-constraint violation, bounded.
-      const c = await insertWithUniqueRetry<Carton>("ols_cartons", () => {
+      const c = await insertWithUniqueRetry<Carton>("ols_cartons", async () => {
         const legacyNo = num.carton();
+        const cartonIndex = await allocateNextCartonIndex(orderRef);
         return {
           carton_no: legacyNo,
           order_ref: orderRef,
           customer_code: order?.customer_code,
           customer_name: order?.customer_name,
           status: "draft",
-          carton_index: (allCartons.filter(r => r.order_ref === orderRef).length) + 1,
+          carton_index: cartonIndex,
           metadata: buildCartonMetadata(orderRef, legacyNo),
         };
       });
+      setAllCartons(prev => [c, ...prev]);
       setCarton(c);
       setContents([]);
       setIdentityResult(null);

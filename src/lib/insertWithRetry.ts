@@ -18,13 +18,13 @@ const DEFAULT_MAX_ATTEMPTS = 5;
  */
 export async function insertWithUniqueRetry<T>(
   table: string,
-  buildRow: () => object,
+  buildRow: () => object | Promise<object>,
   maxAttempts = DEFAULT_MAX_ATTEMPTS,
 ): Promise<T> {
   let lastErr: unknown;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      return await insertRow<T>(table, buildRow());
+      return await insertRow<T>(table, await buildRow());
     } catch (e: unknown) {
       lastErr = e;
       if (!isDuplicateError(e) || attempt === maxAttempts) throw e;

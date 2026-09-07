@@ -20,13 +20,19 @@ function extractChainHash(details?: Record<string, unknown>): string | undefined
   return evidence?.chainHash;
 }
 
+export interface ResolvePriorHandoverChainHashOpts {
+  /** When true, return undefined if the entity has no prior scoped handover. */
+  scopedOnly?: boolean;
+}
+
 /**
- * Resolve the latest handover chainHash for an entity, or the most recent
- * handover in the audit log when no entity-specific record exists.
+ * Resolve the latest handover chainHash for an entity. Unless `scopedOnly` is
+ * set, falls back to the most recent handover in the audit log (cross-stage).
  */
 export async function resolvePriorHandoverChainHash(
   entityType?: string,
   entityId?: string,
+  opts?: ResolvePriorHandoverChainHashOpts,
 ): Promise<string | undefined> {
   const logs = await listTable<AuditLogRow>("ols_audit_logs", { order: "created_at", limit: 100 });
   if (entityType && entityId) {
@@ -37,6 +43,7 @@ export async function resolvePriorHandoverChainHash(
       }
     }
   }
+  if (opts?.scopedOnly) return undefined;
   for (const log of logs) {
     const hash = extractChainHash(log.details);
     if (hash) return hash;

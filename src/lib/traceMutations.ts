@@ -1,6 +1,6 @@
 import { invokeTraceMutation } from "@/lib/data";
 import type { HandoverEvidence } from "@/lib/handoverEvidence";
-import type { Carton, DplDocument, FinancePi, PrinterRow, ProductionBatch, ProductionLabel, ShippingLabelRow } from "@/lib/types";
+import type { Carton, CartonContent, DplDocument, FinancePi, PrinterRow, ProductionBatch, ProductionLabel, ShippingLabelRow } from "@/lib/types";
 
 export interface ProductionMutationResult { batch: ProductionBatch; labels: ProductionLabel[] }
 export interface PiCartonMutationResult { pi: FinancePi; carton: Carton; link_id: string }
@@ -26,7 +26,7 @@ export const traceMutations = {
       p_actor_id: opts?.actorId ?? null,
     }),
   addCartonContent: (cartonId: string, labelId: string, idempotencyKey: string) =>
-    invokeTraceMutation<Carton>("trace_add_carton_content_v1", {
+    invokeTraceMutation<CartonContent>("trace_add_carton_content_v1", {
       p_carton_id: cartonId,
       p_production_label_id: labelId,
       p_idempotency_key: idempotencyKey,

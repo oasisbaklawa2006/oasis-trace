@@ -25,7 +25,7 @@ export interface SealCartonResult {
  */
 export async function sealCartonWithHandover(input: SealCartonInput): Promise<SealCartonResult> {
   const idempotencyKey = `finalize-carton:${input.carton.id}`;
-  const priorHash = await resolvePriorHandoverChainHash("carton", input.carton.id);
+  const priorHash = await resolvePriorHandoverChainHash("carton", input.carton.id, { scopedOnly: true });
   const evidence = await buildHandoverEvidence(
     "packing",
     "carton",

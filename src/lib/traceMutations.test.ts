@@ -39,6 +39,17 @@ describe("governed Trace mutation client", () => {
     });
   });
 
+  it("routes carton content pack through governed add RPC", async () => {
+    invoke.mockResolvedValue({ id: "content-1", carton_id: "carton-1", production_label_id: "label-1" });
+    const { traceMutations } = await import("./traceMutations");
+    await traceMutations.addCartonContent("carton-1", "label-1", "carton-pack:carton-1:label-1");
+    expect(invoke).toHaveBeenCalledWith("trace_add_carton_content_v1", {
+      p_carton_id: "carton-1",
+      p_production_label_id: "label-1",
+      p_idempotency_key: "carton-pack:carton-1:label-1",
+    });
+  });
+
   it("forwards handover evidence payload to finalize RPC when provided", async () => {
     invoke.mockResolvedValue({ id: "carton-1", status: "packed" });
     const evidence = {

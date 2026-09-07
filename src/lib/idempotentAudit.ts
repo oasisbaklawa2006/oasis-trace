@@ -9,7 +9,8 @@ interface AuditLogRow {
   details?: Record<string, unknown>;
 }
 
-/** Skip or no-op when an audit row with the same idempotency key already exists. */
+/** Skip or no-op when an audit row with the same idempotency key already exists.
+ *  Core should enforce uniqueness on (details->>'idempotency_key', entity_id). */
 export async function insertIdempotentHandoverAudit(
   row: {
     action: string;

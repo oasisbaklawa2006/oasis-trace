@@ -105,7 +105,46 @@ export async function listTable<T = unknown>(table: string, opts?: { order?: str
       return data;
     } catch (e: unknown) { setMode("demo", errorMessage(e)); }
   }
-  return demo.list<T>(table);
+  return demo.list<T>(table, opts);
+}
+
+export type CountFilter =
+  | { column: string; op: "eq"; value: unknown }
+  | { column: string; op: "neq"; value: unknown }
+  | { column: string; op: "in"; value: unknown[] };
+
+function normalizeCountFilters(filters?: CountFilter | CountFilter[]): CountFilter[] {
+  if (!filters) return [];
+  return Array.isArray(filters) ? filters : [filters];
+}
+
+/** Server-side row count — avoids polling full table history for kiosk summaries. */
+export async function countTable(table: string, filters?: CountFilter | CountFilter[]): Promise<number> {
+  const normalized = normalizeCountFilters(filters);
+  if (supabaseConfigured && supabase) {
+    try {
+      const count = await withRetry(async () => {
+        let q = supabase!.from(table).select("*", { count: "exact", head: true });
+        for (const f of normalized) {
+          if (f.op === "eq") q = q.eq(f.column, f.value);
+          else if (f.op === "neq") q = q.neq(f.column, f.value);
+          else q = q.in(f.column, f.value);
+        }
+        const { count, error } = await withTimeout(q);
+        if (error) throw error;
+        return count ?? 0;
+      });
+      setMode("live");
+      return count;
+    } catch (e: unknown) { setMode("demo", errorMessage(e)); }
+  }
+  let rows = demo.all(table);
+  for (const f of normalized) {
+    if (f.op === "eq") rows = rows.filter(r => r[f.column] === f.value);
+    else if (f.op === "neq") rows = rows.filter(r => r[f.column] !== f.value);
+    else rows = rows.filter(r => (f.value as unknown[]).includes(r[f.column]));
+  }
+  return rows.length;
 }
 
 export async function insertRow<T = unknown>(table: string, row: object): Promise<T> {
