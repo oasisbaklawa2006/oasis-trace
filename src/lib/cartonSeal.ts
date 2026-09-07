@@ -1,4 +1,8 @@
-import { buildHandoverEvidence, type HandoverEvidence } from "@/lib/handoverEvidence";
+import {
+  assertAcceptedHandoverEvidence,
+  resolveHandoverEvidence,
+  type HandoverEvidence,
+} from "@/lib/handoverEvidence";
 import { resolvePriorHandoverChainHash } from "@/lib/handoverChain";
 import { insertIdempotentHandoverAudit } from "@/lib/idempotentAudit";
 import { traceMutations } from "@/lib/traceMutations";
@@ -26,19 +30,21 @@ export interface SealCartonResult {
 export async function sealCartonWithHandover(input: SealCartonInput): Promise<SealCartonResult> {
   const idempotencyKey = `finalize-carton:${input.carton.id}`;
   const priorHash = await resolvePriorHandoverChainHash("carton", input.carton.id, { scopedOnly: true });
-  const evidence = await buildHandoverEvidence(
-    "packing",
-    "carton",
-    input.carton.id,
-    input.carton.carton_no,
-    {
+  const evidence = await resolveHandoverEvidence({
+    stage: "packing",
+    entityType: "carton",
+    entityId: input.carton.id,
+    referenceNo: input.carton.carton_no,
+    metadata: {
       order_ref: input.carton.order_ref,
       label_count: input.labelCount,
       net: input.net,
       gross: input.gross,
     },
-    { actorId: input.actorId, priorHash },
-  );
+    actorId: input.actorId,
+    priorHash,
+  });
+  assertAcceptedHandoverEvidence(evidence);
 
   const sealed = await traceMutations.finalizeCarton(
     input.carton.id,

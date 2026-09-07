@@ -56,4 +56,36 @@ export const traceMutations = {
       p_carton_id: cartonId,
       p_idempotency_key: idempotencyKey,
     }),
+  signHandoverEvidence: (input: {
+    stage: string;
+    entityType: string;
+    entityId: string;
+    referenceNo: string;
+    metadata: Record<string, unknown>;
+    actorId?: string;
+    priorHash?: string;
+  }) =>
+    invokeTraceMutation<HandoverEvidence>("trace_sign_handover_evidence_v1", {
+      p_stage: input.stage,
+      p_entity_type: input.entityType,
+      p_entity_id: input.entityId,
+      p_reference_no: input.referenceNo,
+      p_metadata: input.metadata,
+      p_actor_id: input.actorId ?? null,
+      p_prior_hash: input.priorHash ?? null,
+    }),
+  insertHandoverAudit: (
+    action: string,
+    entityType: string,
+    entityId: string,
+    details: Record<string, unknown>,
+    idempotencyKey: string,
+  ) =>
+    invokeTraceMutation("trace_insert_handover_audit_v1", {
+      p_action: action,
+      p_entity_type: entityType,
+      p_entity_id: entityId,
+      p_details: details,
+      p_idempotency_key: idempotencyKey,
+    }),
 };

@@ -1,12 +1,35 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import {
+  assertAcceptedHandoverEvidence,
   assertSoftwareChainEvidence,
   buildHandoverEvidence,
+  HANDOVER_INTEGRITY_AUTHENTICATED,
   isAuthenticatedHandoverEvidence,
+  resolveHandoverEvidence,
   verifyHandoverEvidence,
 } from "./handoverEvidence";
 
+const { invokeTraceMutation } = vi.hoisted(() => ({
+  invokeTraceMutation: vi.fn(),
+}));
+
+vi.mock("@/lib/data", () => ({
+  invokeTraceMutation: (...args: unknown[]) => invokeTraceMutation(...args),
+}));
+
+const supabaseConfigured = vi.hoisted(() => ({ value: false }));
+vi.mock("@/lib/supabase", () => ({
+  get supabaseConfigured() {
+    return supabaseConfigured.value;
+  },
+}));
+
 describe("handoverEvidence", () => {
+  beforeEach(() => {
+    invokeTraceMutation.mockReset();
+    supabaseConfigured.value = false;
+  });
+
   it("builds verifiable handover evidence", async () => {
     const evidence = await buildHandoverEvidence("gate", "shipping_label", "lbl-1", "SHP-0001", { result: "green" });
     expect(evidence.version).toBe("1.0");
@@ -33,5 +56,61 @@ describe("handoverEvidence", () => {
     const evidence = await buildHandoverEvidence("packing", "carton", "c-1", "CTN-1", {});
     expect(isAuthenticatedHandoverEvidence(evidence)).toBe(false);
     assertSoftwareChainEvidence(evidence);
+  });
+
+  it("uses Core signing RPC in live mode", async () => {
+    supabaseConfigured.value = true;
+    const signed = {
+      version: "1.0" as const,
+      integrityClass: HANDOVER_INTEGRITY_AUTHENTICATED,
+      stage: "packing" as const,
+      entityType: "carton",
+      entityId: "c-1",
+      referenceNo: "CTN-1",
+      occurredAt: "2026-09-07T12:00:00.000Z",
+      metadata: { labels: 2 },
+      contentHash: "signed-content",
+      chainHash: "signed-chain",
+    };
+    invokeTraceMutation.mockResolvedValue(signed);
+    const evidence = await resolveHandoverEvidence({
+      stage: "packing",
+      entityType: "carton",
+      entityId: "c-1",
+      referenceNo: "CTN-1",
+      metadata: { labels: 2 },
+      priorHash: "prior",
+    });
+    expect(evidence.integrityClass).toBe(HANDOVER_INTEGRITY_AUTHENTICATED);
+    expect(invokeTraceMutation).toHaveBeenCalledWith("trace_sign_handover_evidence_v1", {
+      p_stage: "packing",
+      p_entity_type: "carton",
+      p_entity_id: "c-1",
+      p_reference_no: "CTN-1",
+      p_metadata: { labels: 2 },
+      p_actor_id: null,
+      p_prior_hash: "prior",
+    });
+    assertAcceptedHandoverEvidence(evidence);
+  });
+
+  it("fails closed when Core signing RPC is not deployed", async () => {
+    supabaseConfigured.value = true;
+    invokeTraceMutation.mockRejectedValueOnce(
+      Object.assign(new Error("missing rpc"), { message: "function trace_sign_handover_evidence_v1() does not exist" }),
+    );
+    await expect(resolveHandoverEvidence({
+      stage: "gate",
+      entityType: "shipping_label",
+      entityId: "lbl-1",
+      referenceNo: "SHP-1",
+      metadata: {},
+    })).rejects.toThrow(/not deployed/i);
+  });
+
+  it("rejects software_chain evidence in live acceptance guard", async () => {
+    supabaseConfigured.value = true;
+    const evidence = await buildHandoverEvidence("packing", "carton", "c-1", "CTN-1", {});
+    expect(() => assertAcceptedHandoverEvidence(evidence)).toThrow(/core_signed_v1/i);
   });
 });

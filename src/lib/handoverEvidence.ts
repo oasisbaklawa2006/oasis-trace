@@ -2,10 +2,13 @@
  * Immutable handover evidence — deterministic proof binding for
  * production / packing / dispatch / gate / finance stages.
  *
- * Software integrity chain (SHA-256). Authenticated server signing is a
- * Core prerequisite — client hashes are tamper-evident, not tamper-proof.
+ * Software integrity chain (SHA-256) is demo/preview/tests only.
+ * Live acceptance requires Core `trace_sign_handover_evidence_v1` (core_signed_v1).
  * Physical custody and scanner UAT remain Leap13.
  */
+import { invokeTraceMutation } from "@/lib/data";
+import { isRpcNotDeployedError } from "@/lib/rpcErrors";
+import { supabaseConfigured } from "@/lib/supabase";
 export type HandoverStage = "production" | "packing" | "dispatch" | "gate" | "finance";
 
 export const HANDOVER_EVIDENCE_VERSION = "1.0";
@@ -101,5 +104,75 @@ export function isAuthenticatedHandoverEvidence(evidence: HandoverEvidence): boo
 export function assertSoftwareChainEvidence(evidence: HandoverEvidence): void {
   if (evidence.integrityClass !== HANDOVER_INTEGRITY_CLASS) {
     throw new Error(`Expected software_chain_v1 evidence, got ${evidence.integrityClass}`);
+  }
+}
+
+export interface ResolveHandoverEvidenceInput {
+  stage: HandoverStage;
+  entityType: string;
+  entityId: string;
+  referenceNo: string;
+  metadata: Record<string, unknown>;
+  actorId?: string;
+  priorHash?: string;
+}
+
+/**
+ * Resolve handover evidence for persistence.
+ * Demo: software_chain_v1 (client hash chain).
+ * Live: Core-authenticated core_signed_v1 — fails closed when signing RPC is missing.
+ */
+export async function resolveHandoverEvidence(
+  input: ResolveHandoverEvidenceInput,
+): Promise<HandoverEvidence> {
+  if (!supabaseConfigured) {
+    return buildHandoverEvidence(
+      input.stage,
+      input.entityType,
+      input.entityId,
+      input.referenceNo,
+      input.metadata,
+      { actorId: input.actorId, priorHash: input.priorHash },
+    );
+  }
+
+  try {
+    const evidence = await invokeTraceMutation<HandoverEvidence>(
+      "trace_sign_handover_evidence_v1",
+      {
+        p_stage: input.stage,
+        p_entity_type: input.entityType,
+        p_entity_id: input.entityId,
+        p_reference_no: input.referenceNo,
+        p_metadata: input.metadata,
+        p_actor_id: input.actorId ?? null,
+        p_prior_hash: input.priorHash ?? null,
+      },
+    );
+    if (
+      evidence
+      && typeof evidence === "object"
+      && evidence.integrityClass === HANDOVER_INTEGRITY_AUTHENTICATED
+      && typeof evidence.chainHash === "string"
+      && evidence.chainHash.length > 0
+    ) {
+      return evidence;
+    }
+    throw new Error("Invalid handover evidence response from trace_sign_handover_evidence_v1");
+  } catch (err: unknown) {
+    if (!isRpcNotDeployedError(err)) throw err;
+    throw new Error(
+      "Trace operation rejected: trace_sign_handover_evidence_v1 is not deployed. "
+      + "Accepted handover evidence requires Core authenticated signing.",
+    );
+  }
+}
+
+/** Reject client software-chain evidence when live backend is configured. */
+export function assertAcceptedHandoverEvidence(evidence: HandoverEvidence): void {
+  if (supabaseConfigured && !isAuthenticatedHandoverEvidence(evidence)) {
+    throw new Error(
+      "Handover evidence rejected: live mode requires core_signed_v1 authenticated evidence.",
+    );
   }
 }

@@ -8,7 +8,7 @@
 import { insertRow, invokeTraceMutation, listTable, updateRow } from "@/lib/data";
 import { isRpcNotDeployedError } from "@/lib/rpcErrors";
 import { supabaseConfigured } from "@/lib/supabase";
-import { buildHandoverEvidence } from "@/lib/handoverEvidence";
+import { resolveHandoverEvidence } from "@/lib/handoverEvidence";
 import { resolvePriorHandoverChainHash } from "@/lib/handoverChain";
 import { resolveLegacyGateDecision, type LegacyGateDecision } from "@/lib/scanService";
 import type { Carton, FinancePi, ShippingLabelRow } from "@/lib/types";
@@ -60,14 +60,15 @@ async function dispatchLegacyGreen(
   actorId?: string,
 ): Promise<void> {
   const priorHash = await resolvePriorHandoverChainHash("carton", ctn.id);
-  const evidence = await buildHandoverEvidence(
-    "gate",
-    "shipping_label",
-    lbl.id,
-    ctn.carton_no,
-    { shipping_no: lbl.shipping_no, qr_ref: ref, result: "green" },
-    { actorId, priorHash },
-  );
+  const evidence = await resolveHandoverEvidence({
+    stage: "gate",
+    entityType: "shipping_label",
+    entityId: lbl.id,
+    referenceNo: ctn.carton_no,
+    metadata: { shipping_no: lbl.shipping_no, qr_ref: ref, result: "green" },
+    actorId,
+    priorHash,
+  });
   await updateRow("ols_cartons", ctn.id, { status: "dispatched" });
   await updateRow("ols_shipping_labels", lbl.id, { status: "dispatched" });
   await insertRow("ols_inventory_movements", {
@@ -129,6 +130,10 @@ export async function executeLegacyGateHandoff(
         return { decision };
       } catch (err: unknown) {
         if (!isRpcNotDeployedError(err)) throw err;
+        throw new Error(
+          "Trace operation rejected: trace_legacy_gate_clear_v1 is not deployed. "
+          + "Live gate dispatch requires governed Core RPC.",
+        );
       }
     }
 
