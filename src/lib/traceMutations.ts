@@ -27,4 +27,11 @@ export const traceMutations = {
       "trace_reconcile_external_refs_v1",
       {},
     ),
+  legacyGateClear: (qrRef: string, shippingLabelId: string, cartonId: string, idempotencyKey: string) =>
+    invokeTraceMutation("trace_legacy_gate_clear_v1", {
+      p_qr_ref: qrRef,
+      p_shipping_label_id: shippingLabelId,
+      p_carton_id: cartonId,
+      p_idempotency_key: idempotencyKey,
+    }),
 };

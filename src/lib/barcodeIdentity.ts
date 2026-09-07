@@ -130,6 +130,10 @@ export function allocateTraceIdentity(
 ): string {
   const spec = ALLOC_SPECS[kind];
   const seq = opts?.sequence ?? nextSequence(kind, opts?.date);
+  const maximum = 10 ** spec.seqDigits - 1;
+  if (!Number.isInteger(seq) || seq < 1 || seq > maximum) {
+    throw new Error(`Sequence out of range for ${kind}: ${seq} (max ${maximum})`);
+  }
   return `${spec.prefix}-${ymd(opts?.date)}-${String(seq).padStart(spec.seqDigits, "0")}`;
 }
 

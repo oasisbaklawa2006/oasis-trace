@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { listTable } from "@/lib/data";
+import { useSerializedPoll } from "@/hooks/useSerializedPoll";
 import type { GateScanRow } from "@/lib/types";
 import { ShieldCheck, ShieldAlert } from "lucide-react";
 
@@ -10,18 +11,13 @@ export default function TvGate() {
   const [history, setHistory] = useState<GateScanRow[]>([]);
   const [latest, setLatest] = useState<GateScanRow | null>(null);
 
-  useEffect(() => {
-    let active = true;
-    async function load() {
-      const rows = await listTable<GateScanRow>("ols_gate_scans", { order: "scanned_at", limit: 20 });
-      if (!active) return;
-      setHistory(rows);
-      setLatest(rows[0] ?? null);
-    }
-    load();
-    const t = setInterval(load, REFRESH_MS);
-    return () => { active = false; clearInterval(t); };
+  const load = useCallback(async () => {
+    const rows = await listTable<GateScanRow>("ols_gate_scans", { order: "scanned_at", limit: 20 });
+    setHistory(rows);
+    setLatest(rows[0] ?? null);
   }, []);
+
+  useSerializedPoll(load, REFRESH_MS);
 
   const greens = history.filter(h => h.result === "green").length;
   const reds = history.length - greens;

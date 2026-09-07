@@ -2,14 +2,18 @@
  * Immutable handover evidence — deterministic proof binding for
  * production / packing / dispatch / gate / finance stages.
  *
- * Software signature chain only. Physical custody and scanner UAT remain Leap13.
+ * Software integrity chain (SHA-256). Authenticated server signing is a
+ * Core prerequisite — client hashes are tamper-evident, not tamper-proof.
+ * Physical custody and scanner UAT remain Leap13.
  */
 export type HandoverStage = "production" | "packing" | "dispatch" | "gate" | "finance";
 
 export const HANDOVER_EVIDENCE_VERSION = "1.0";
+export const HANDOVER_INTEGRITY_CLASS = "software_chain_v1";
 
 export interface HandoverEvidence {
   version: typeof HANDOVER_EVIDENCE_VERSION;
+  integrityClass: typeof HANDOVER_INTEGRITY_CLASS;
   stage: HandoverStage;
   entityType: string;
   entityId: string;
@@ -52,6 +56,7 @@ export async function buildHandoverEvidence(
   const chainHash = await sha256Hex(chainInput);
   return {
     version: HANDOVER_EVIDENCE_VERSION,
+    integrityClass: HANDOVER_INTEGRITY_CLASS,
     stage,
     entityType,
     entityId,

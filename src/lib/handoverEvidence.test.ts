@@ -5,6 +5,7 @@ describe("handoverEvidence", () => {
   it("builds verifiable handover evidence", async () => {
     const evidence = await buildHandoverEvidence("gate", "shipping_label", "lbl-1", "SHP-0001", { result: "green" });
     expect(evidence.version).toBe("1.0");
+    expect(evidence.integrityClass).toBe("software_chain_v1");
     expect(evidence.contentHash).toHaveLength(64);
     expect(await verifyHandoverEvidence(evidence)).toBe(true);
   });

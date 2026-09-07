@@ -69,39 +69,44 @@ export function analyzeExternalRefBindings(orders: CentralOrderRef[]): Reconcili
   };
 }
 
+export function formatReconcileResult(
+  report: ReconciliationReport,
+  applied: number,
+): Pick<ExternalRefSyncResult, "ok" | "message"> {
+  const ok = report.unbound === 0 && report.invalid === 0;
+  if (!ok) {
+    const parts: string[] = [];
+    if (report.unbound > 0) parts.push(`${report.unbound} unbound`);
+    if (report.invalid > 0) parts.push(`${report.invalid} invalid`);
+    return {
+      ok: false,
+      message: `Reconcile incomplete: ${parts.join(", ")} order binding(s) remain unresolved.`,
+    };
+  }
+  if (applied > 0) {
+    return { ok: true, message: `Reconciled ${applied} order binding(s).` };
+  }
+  return { ok: true, message: "All orders bound." };
+}
+
 export async function reconcileExternalRefs(): Promise<ExternalRefSyncResult> {
   const orders = await listTable<OrderCache>("ols_orders_cache", { order: "order_number" });
   const initial = analyzeExternalRefBindings(orders);
 
   if (supabaseConfigured) {
-    try {
-      const result = await invokeTraceMutation<{
-        bindings?: Array<{ cache_id: string; external_ref: string }>;
-        applied?: number;
-      }>("trace_reconcile_external_refs_v1", {});
-      let applied = 0;
-      for (const b of result.bindings ?? []) {
-        await updateRow("ols_orders_cache", b.cache_id, { external_ref: b.external_ref });
-        applied++;
-      }
-      const refreshed = await listTable<OrderCache>("ols_orders_cache", { order: "order_number" });
-      const report = analyzeExternalRefBindings(refreshed);
-      return {
-        ok: report.unbound === 0 && report.invalid === 0,
-        report,
-        applied: result.applied ?? applied,
-        message: applied > 0 || (result.applied ?? 0) > 0
-          ? `Reconciled ${result.applied ?? applied} order binding(s) from Core.`
-          : "Core reconcile complete — all orders bound.",
-      };
-    } catch {
-      return {
-        ok: initial.unbound === 0 && initial.invalid === 0,
-        report: initial,
-        applied: 0,
-        message: "Binding analysis complete. Core reconcile RPC not available — await Core sync.",
-      };
+    const result = await invokeTraceMutation<{
+      bindings?: Array<{ cache_id: string; external_ref: string }>;
+      applied?: number;
+    }>("trace_reconcile_external_refs_v1", {});
+    let applied = 0;
+    for (const b of result.bindings ?? []) {
+      await updateRow("ols_orders_cache", b.cache_id, { external_ref: b.external_ref });
+      applied++;
     }
+    const refreshed = await listTable<OrderCache>("ols_orders_cache", { order: "order_number" });
+    const report = analyzeExternalRefBindings(refreshed);
+    const { ok, message } = formatReconcileResult(report, result.applied ?? applied);
+    return { ok, report, applied: result.applied ?? applied, message };
   }
 
   let applied = 0;
@@ -114,12 +119,6 @@ export async function reconcileExternalRefs(): Promise<ExternalRefSyncResult> {
   }
   const refreshed = await listTable<OrderCache>("ols_orders_cache", { order: "order_number" });
   const report = analyzeExternalRefBindings(refreshed);
-  return {
-    ok: report.unbound === 0 && report.invalid === 0,
-    report,
-    applied,
-    message: applied > 0
-      ? `Demo reconcile applied ${applied} binding(s).`
-      : "All orders bound or no demo mappings available.",
-  };
+  const { ok, message } = formatReconcileResult(report, applied);
+  return { ok, report, applied, message };
 }

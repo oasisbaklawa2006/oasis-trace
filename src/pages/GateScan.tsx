@@ -1,12 +1,12 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CentralPayloadPreview } from "@/components/CentralPayloadPreview";
-import { listTable, insertRow, updateRow } from "@/lib/data";
+import { listTable } from "@/lib/data";
 import { classifyCartonBarcode } from "@/lib/scanContract";
-import { processDispatchGateCtnSoScan, resolveLegacyGateDecision, type ScanFlowResult, type LegacyGateResult } from "@/lib/scanService";
-import { buildHandoverEvidence } from "@/lib/handoverEvidence";
+import { processDispatchGateCtnSoScan, type ScanFlowResult, type LegacyGateResult } from "@/lib/scanService";
+import { executeLegacyGateHandoff } from "@/lib/legacyGateHandoff";
 import { ShieldCheck, ShieldAlert, ScanLine, Volume2, VolumeX } from "lucide-react";
 import { feedback, isFeedbackEnabled, setFeedbackEnabled } from "@/lib/scanFeedback";
 import { toast } from "sonner";
@@ -31,6 +31,7 @@ export default function GateScan() {
   const [submitting, setSubmitting] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const { session, canSubmitCentral } = useOlsSession();
+  const processingRef = useRef(false);
 
   usePendingCentralSubmitSync(ctnResult?.idempotencyKey, setSubmitResult);
 
@@ -44,43 +45,9 @@ export default function GateScan() {
 
   useEffect(() => { reload(); }, []);
 
-  const checkLegacyShipping = useCallback(async (ref: string) => {
-    setScanError(null);
-    const { result: res, label: lbl, carton: ctn } = resolveLegacyGateDecision(ref, { shippingLabels: labels, cartons, pis });
-    if (res.kind === "green" && ctn && lbl) {
-      await updateRow("ols_cartons", ctn.id, { status: "dispatched" });
-      await updateRow("ols_shipping_labels", lbl.id, { status: "dispatched" });
-      await insertRow("ols_inventory_movements", {
-        production_label_id: null, from_location: "shipping", to_location: "dispatched",
-        movement_type: "gate_clear", reference_no: ctn.carton_no,
-      });
-      const evidence = await buildHandoverEvidence(
-        "gate", "shipping_label", lbl.id, ctn.carton_no,
-        { shipping_no: lbl.shipping_no, qr_ref: ref, result: "green" },
-        { actorId: session?.user?.id },
-      );
-      await insertRow("ols_audit_logs", {
-        action: "gate_dispatched", entity_type: "shipping_label", entity_id: lbl.id,
-        details: { carton_no: ctn.carton_no, shipping_no: lbl.shipping_no, qr_ref: ref, handover_evidence: evidence },
-      });
-    }
-    await insertRow("ols_gate_scans", { qr_ref: ref, shipping_label_id: lbl?.id, result: res.kind, reason: res.reason });
-    await insertRow("ols_scan_history", {
-      scan_value: ref, scan_context: "gate_shipping_qr", result: res.kind,
-      metadata: { reason: res.reason || null, legacy_flow: true },
-    });
-    if (res.kind === "red") {
-      await insertRow("ols_audit_logs", {
-        action: "gate_hold", entity_type: "shipping_label", entity_id: lbl?.id,
-        details: { qr_ref: ref, reason: res.reason },
-      });
-    }
-    feedback(res.kind === "green" ? "ok" : (res.title === "DUPLICATE" ? "dup" : "error"));
-    setLegacyResult(res);
-    setCtnResult(null);
-  }, [labels, cartons, pis, session?.user?.id]);
-
   const processScan = useCallback(async (raw: string) => {
+    if (processingRef.current) return;
+    processingRef.current = true;
     try {
       setScanError(null);
       const ref = raw.trim();
@@ -117,15 +84,29 @@ export default function GateScan() {
         return;
       }
 
-      await checkLegacyShipping(ref);
+      await executeLegacyGateHandoff({
+        ref,
+        shippingLabels: labels,
+        cartons,
+        pis,
+        actorId: session?.user?.id,
+      }).then(({ decision, duplicateDispatch }) => {
+        const res = decision.result;
+        if (duplicateDispatch) feedback("dup");
+        else feedback(res.kind === "green" ? "ok" : (res.title === "DUPLICATE" ? "dup" : "error"));
+        setLegacyResult(res);
+        setCtnResult(null);
+      });
       reload();
     } catch (err: unknown) {
       const msg = errorMessage(err, "Scan failed");
       setScanError(msg);
       toast.error(msg, { duration: Infinity });
       feedback("error");
+    } finally {
+      processingRef.current = false;
     }
-  }, [orders, labels, cartons, checkLegacyShipping]);
+  }, [orders, labels, cartons, pis, session?.user?.id]);
 
   const { ref: inputRef, value: scan, setValue: setScan, handleKey, submit } = useScanLoop({
     onScan: processScan,

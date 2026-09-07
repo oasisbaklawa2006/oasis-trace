@@ -2,12 +2,15 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import {
   analyzeExternalRefBindings,
   DEMO_EXTERNAL_REFS,
+  formatReconcileResult,
   reconcileExternalRefs,
 } from "./externalRefSync";
 
-const listTable = vi.fn();
-const updateRow = vi.fn();
-const invokeTraceMutation = vi.fn();
+const { listTable, updateRow, invokeTraceMutation } = vi.hoisted(() => ({
+  listTable: vi.fn(),
+  updateRow: vi.fn(),
+  invokeTraceMutation: vi.fn(),
+}));
 
 vi.mock("@/lib/data", () => ({
   listTable: (...args: unknown[]) => listTable(...args),
@@ -35,6 +38,15 @@ describe("externalRefSync", () => {
     expect(report.invalid).toBe(1);
   });
 
+  it("reports incomplete reconcile when bindings remain unresolved", () => {
+    const report = analyzeExternalRefBindings([
+      { id: "1", order_number: "SO-2026-0001" },
+    ]);
+    const { ok, message } = formatReconcileResult(report, 0);
+    expect(ok).toBe(false);
+    expect(message).toMatch(/unbound/);
+  });
+
   it("applies demo bindings for unbound orders in demo mode", async () => {
     listTable
       .mockResolvedValueOnce([
@@ -48,6 +60,7 @@ describe("externalRefSync", () => {
     updateRow.mockResolvedValue({});
     const result = await reconcileExternalRefs();
     expect(result.applied).toBe(2);
+    expect(result.ok).toBe(true);
     expect(result.report.bound).toBe(2);
     expect(updateRow).toHaveBeenCalledTimes(2);
   });

@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { listTable } from "@/lib/data";
+import { useSerializedPoll } from "@/hooks/useSerializedPoll";
 import type { Carton, ShippingLabelRow } from "@/lib/types";
 import { PackageCheck, Truck } from "lucide-react";
 
@@ -10,21 +11,16 @@ export default function TvDispatch() {
   const [cartons, setCartons] = useState<Carton[]>([]);
   const [labels, setLabels] = useState<ShippingLabelRow[]>([]);
 
-  useEffect(() => {
-    let active = true;
-    async function load() {
-      const [c, l] = await Promise.all([
-        listTable<Carton>("ols_cartons", { order: "created_at", limit: 50 }),
-        listTable<ShippingLabelRow>("ols_shipping_labels", { order: "created_at", limit: 50 }),
-      ]);
-      if (!active) return;
-      setCartons(c);
-      setLabels(l);
-    }
-    load();
-    const t = setInterval(load, REFRESH_MS);
-    return () => { active = false; clearInterval(t); };
+  const load = useCallback(async () => {
+    const [c, l] = await Promise.all([
+      listTable<Carton>("ols_cartons", { order: "created_at", limit: 50 }),
+      listTable<ShippingLabelRow>("ols_shipping_labels", { order: "created_at", limit: 50 }),
+    ]);
+    setCartons(c);
+    setLabels(l);
   }, []);
+
+  useSerializedPoll(load, REFRESH_MS);
 
   const packed = cartons.filter(c => c.status === "packed" || c.status === "finance_received").length;
   const dispatched = cartons.filter(c => c.status === "dispatched").length;

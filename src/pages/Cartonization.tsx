@@ -28,6 +28,7 @@ import { buildCartonLabelPayload } from "@/lib/labelPayloads";
 import { insertWithUniqueRetry } from "@/lib/insertWithRetry";
 import { traceMutations } from "@/lib/traceMutations";
 import { buildHandoverEvidence } from "@/lib/handoverEvidence";
+import { resolvePriorHandoverChainHash } from "@/lib/handoverChain";
 import {
   validateAddContent,
   validateCreateCarton,
@@ -227,21 +228,22 @@ export default function Cartonization() {
         cartonIndex: carton.carton_index, itemCount: contents.length,
         netWeightKg: net, barcode: barcodeDisplay?.labelBarcode || carton.carton_no,
       }));
-      await traceMutations.finalizeCarton(
-        carton.id, net, gross, copiedToClipboard, `finalize-carton:${carton.id}`,
-      );
+      const priorHash = await resolvePriorHandoverChainHash("carton", carton.id);
       const evidence = await buildHandoverEvidence(
         "packing", "carton", carton.id, carton.carton_no,
         { order_ref: carton.order_ref, label_count: contents.length, net, gross },
-        { actorId: session?.user?.id },
+        { actorId: session?.user?.id, priorHash },
+      );
+      await traceMutations.finalizeCarton(
+        carton.id, net, gross, copiedToClipboard, `finalize-carton:${carton.id}`,
       );
       await insertRow("ols_audit_logs", {
         action: "carton_sealed", entity_type: "carton", entity_id: carton.id,
-        details: { carton_no: carton.carton_no, handover_evidence: evidence },
+        details: { carton_no: carton.carton_no, handover_evidence: evidence, idempotency_key: `finalize-carton:${carton.id}` },
       });
       toast.success("Carton packed — label command generated", { description: NO_PHYSICAL_PRINT_NOTE });
       setCarton(null); setContents([]); setIdentityResult(null);
-      const allC = await listTable<Carton>("ols_cartons");
+      const allC = await listTable<Carton>("ols_cartons", { order: "created_at" });
       setAllCartons(allC);
       setRecentCartons(allC.slice(0, 6));
     } catch (err: unknown) {

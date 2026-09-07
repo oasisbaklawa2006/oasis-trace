@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -26,7 +26,8 @@ export default function Settings() {
     try {
       const result = await reconcileExternalRefs();
       setBindingReport(result.report);
-      toast.success(result.message);
+      if (result.ok) toast.success(result.message);
+      else toast.error(result.message);
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Reconcile failed");
     } finally {

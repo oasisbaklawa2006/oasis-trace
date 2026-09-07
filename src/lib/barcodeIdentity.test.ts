@@ -38,6 +38,16 @@ describe("allocateTraceIdentity — deterministic monotonic allocation", () => {
     expect(allocateTraceIdentity("pi", { date: fixedDate, sequence: 1 })).toBe("PI-20260906-001");
     expect(allocateTraceIdentity("shipping", { date: fixedDate, sequence: 1 })).toBe("SHP-20260906-0001");
   });
+
+  it("accepts maximum-width sequence for each kind", () => {
+    expect(allocateTraceIdentity("batch", { date: fixedDate, sequence: 999 })).toBe("BAT-20260906-999");
+    expect(allocateTraceIdentity("production_label", { date: fixedDate, sequence: 9999 })).toBe("PL-20260906-9999");
+  });
+
+  it("rejects sequence overflow beyond spec width", () => {
+    expect(() => allocateTraceIdentity("batch", { date: fixedDate, sequence: 1000 })).toThrow(/out of range/);
+    expect(() => allocateTraceIdentity("production_label", { date: fixedDate, sequence: 10000 })).toThrow(/out of range/);
+  });
 });
 
 describe("deriveCentralCartonBarcode — Point93 compatible derivation", () => {
