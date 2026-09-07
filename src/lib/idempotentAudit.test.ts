@@ -126,6 +126,31 @@ describe("idempotentAudit", () => {
     expect(listTable).not.toHaveBeenCalled();
   });
 
+  it("rejects unauthenticated evidence before live audit RPC", async () => {
+    supabaseConfigured.value = true;
+    await expect(insertIdempotentHandoverAudit({
+      action: "carton_sealed",
+      entity_type: "carton",
+      entity_id: "c-1",
+      details: {
+        idempotency_key: "finalize-carton:c-1",
+        handover_evidence: {
+          version: "1.0" as const,
+          integrityClass: "software_chain_v1" as const,
+          stage: "packing" as const,
+          entityType: "carton",
+          entityId: "c-1",
+          referenceNo: "CTN-1",
+          occurredAt: "2026-09-07T00:00:00.000Z",
+          metadata: {},
+          contentHash: "a",
+          chainHash: "b",
+        },
+      },
+    })).rejects.toThrow(/core_signed_v1/i);
+    expect(invokeTraceMutation).not.toHaveBeenCalled();
+  });
+
   it("fails closed in live mode when Core audit RPC is not deployed", async () => {
     supabaseConfigured.value = true;
     invokeTraceMutation.mockRejectedValueOnce(
@@ -152,30 +177,5 @@ describe("idempotentAudit", () => {
         },
       },
     })).rejects.toThrow(/not deployed/i);
-  });
-
-  it("rejects unauthenticated evidence before live audit RPC", async () => {
-    supabaseConfigured.value = true;
-    await expect(insertIdempotentHandoverAudit({
-      action: "carton_sealed",
-      entity_type: "carton",
-      entity_id: "c-1",
-      details: {
-        idempotency_key: "finalize-carton:c-1",
-        handover_evidence: {
-          version: "1.0" as const,
-          integrityClass: "software_chain_v1" as const,
-          stage: "packing" as const,
-          entityType: "carton",
-          entityId: "c-1",
-          referenceNo: "CTN-1",
-          occurredAt: "2026-09-07T00:00:00.000Z",
-          metadata: {},
-          contentHash: "a",
-          chainHash: "b",
-        },
-      },
-    })).rejects.toThrow(/core_signed_v1/i);
-    expect(invokeTraceMutation).not.toHaveBeenCalled();
   });
 });

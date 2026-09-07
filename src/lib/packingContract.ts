@@ -84,7 +84,7 @@ export const PACKING_PRODUCER_CONSUMER_MATRIX = [
   {
     surface: "carton_identity",
     identifier: "ols_cartons.id + carton_no (legacy CTN-YYYYMMDD-####)",
-    producer: "Trace (numbering.num.carton + insertWithUniqueRetry)",
+    producer: "Core trace_allocate_identity_v1 (live) / Trace preview allocator (demo) + insertWithUniqueRetry",
     consumer: "Trace packing UI, DPL, Finance PI, gate",
     authBoundary: "Core RPC trace_finalize_carton_v1 seals; draft edits Trace-local only",
     idempotencyKey: "finalize-carton:{carton_id}",

@@ -6,6 +6,7 @@ import {
   HANDOVER_INTEGRITY_AUTHENTICATED,
   isAuthenticatedHandoverEvidence,
   resolveHandoverEvidence,
+  verifyAcceptedHandoverEvidence,
   verifyHandoverEvidence,
 } from "./handoverEvidence";
 
@@ -62,7 +63,7 @@ describe("handoverEvidence", () => {
     supabaseConfigured.value = true;
     const signed = {
       version: "1.0" as const,
-      integrityClass: HANDOVER_INTEGRITY_AUTHENTICATED,
+      integrityClass: "core_signed_v1" as const,
       stage: "packing" as const,
       entityType: "carton",
       entityId: "c-1",
@@ -119,7 +120,7 @@ describe("handoverEvidence", () => {
     supabaseConfigured.value = true;
     expect(isAuthenticatedHandoverEvidence({
       version: "1.0",
-      integrityClass: HANDOVER_INTEGRITY_AUTHENTICATED,
+      integrityClass: "core_signed_v1" as const,
       stage: "packing",
       entityType: "carton",
       entityId: "c-1",
@@ -129,5 +130,65 @@ describe("handoverEvidence", () => {
       contentHash: "a",
       chainHash: "b",
     })).toBe(false);
+  });
+
+  it("does not client-verify core_signed_v1 via software chain recompute", async () => {
+    const signed = {
+      version: "1.0" as const,
+      integrityClass: "core_signed_v1" as const,
+      stage: "packing" as const,
+      entityType: "carton",
+      entityId: "c-1",
+      referenceNo: "CTN-1",
+      actorId: "actor-core-1",
+      occurredAt: "2026-09-07T12:00:00.000Z",
+      metadata: {},
+      contentHash: "signed-content",
+      chainHash: "signed-chain",
+    };
+    expect(await verifyHandoverEvidence(signed)).toBe(false);
+  });
+
+  it("verifies authenticated evidence through Core RPC in live mode", async () => {
+    supabaseConfigured.value = true;
+    const signed = {
+      version: "1.0" as const,
+      integrityClass: "core_signed_v1" as const,
+      stage: "packing" as const,
+      entityType: "carton",
+      entityId: "c-1",
+      referenceNo: "CTN-1",
+      actorId: "actor-core-1",
+      occurredAt: "2026-09-07T12:00:00.000Z",
+      metadata: {},
+      contentHash: "signed-content",
+      chainHash: "signed-chain",
+    };
+    invokeTraceMutation.mockResolvedValue(true);
+    expect(await verifyAcceptedHandoverEvidence(signed, { priorHash: "prior" })).toBe(true);
+    expect(invokeTraceMutation).toHaveBeenCalledWith("trace_verify_handover_evidence_v1", {
+      p_evidence: signed,
+      p_prior_hash: "prior",
+    });
+  });
+
+  it("fails closed when Core verify RPC is not deployed", async () => {
+    supabaseConfigured.value = true;
+    invokeTraceMutation.mockRejectedValueOnce(
+      Object.assign(new Error("missing rpc"), { message: "function trace_verify_handover_evidence_v1() does not exist" }),
+    );
+    await expect(verifyAcceptedHandoverEvidence({
+      version: "1.0",
+      integrityClass: "core_signed_v1" as const,
+      stage: "packing",
+      entityType: "carton",
+      entityId: "c-1",
+      referenceNo: "CTN-1",
+      actorId: "actor-core-1",
+      occurredAt: "2026-09-07T12:00:00.000Z",
+      metadata: {},
+      contentHash: "a",
+      chainHash: "b",
+    })).rejects.toThrow(/not deployed/i);
   });
 });

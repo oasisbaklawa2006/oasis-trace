@@ -265,11 +265,14 @@ export function orderSupportsCentralCartonBarcode(orderNumber: string): boolean 
 }
 
 /** Authority matrix for census / contract documentation. */
+const TRACE_IDENTITY_PRODUCER =
+  "Core trace_allocate_identity_v1 (live) / Trace preview allocator (demo)";
+
 export const BARCODE_IDENTITY_AUTHORITY_MATRIX = [
   {
     kind: "production_label",
     format: "PL-YYYYMMDD-####",
-    producer: "Trace (allocateTraceIdentity)",
+    producer: TRACE_IDENTITY_PRODUCER,
     uniqueness: "Trace DB unique on ols_production_labels.label_no",
     centralResolvable: false,
     eanGs1: "Trace label barcode only — Core owns retail product/EAN",
@@ -279,7 +282,7 @@ export const BARCODE_IDENTITY_AUTHORITY_MATRIX = [
   {
     kind: "batch",
     format: "BAT-YYYYMMDD-###",
-    producer: "Trace (allocateTraceIdentity)",
+    producer: TRACE_IDENTITY_PRODUCER,
     uniqueness: "Trace DB unique on ols_production_batches.batch_no",
     centralResolvable: false,
     eanGs1: "n/a",
@@ -299,7 +302,7 @@ export const BARCODE_IDENTITY_AUTHORITY_MATRIX = [
   {
     kind: "legacy_carton",
     format: "CTN-YYYYMMDD-####",
-    producer: "Trace (allocateTraceIdentity — legacy orders only)",
+    producer: TRACE_IDENTITY_PRODUCER + " — legacy orders only",
     uniqueness: "Trace DB unique on ols_cartons.carton_no",
     centralResolvable: false,
     eanGs1: "n/a",
@@ -309,7 +312,7 @@ export const BARCODE_IDENTITY_AUTHORITY_MATRIX = [
   {
     kind: "shipping",
     format: "SHP-YYYYMMDD-####",
-    producer: "Trace (allocateTraceIdentity)",
+    producer: TRACE_IDENTITY_PRODUCER,
     uniqueness: "Trace DB unique on ols_shipping_labels.shipping_no",
     centralResolvable: false,
     eanGs1: "n/a",
@@ -329,7 +332,7 @@ export const BARCODE_IDENTITY_AUTHORITY_MATRIX = [
   {
     kind: "dpl",
     format: "DPL-YYYYMMDD-###",
-    producer: "Trace (allocateTraceIdentity)",
+    producer: TRACE_IDENTITY_PRODUCER,
     uniqueness: "Trace DB unique on ols_dpl_documents.dpl_no",
     centralResolvable: false,
     eanGs1: "n/a",
@@ -339,7 +342,7 @@ export const BARCODE_IDENTITY_AUTHORITY_MATRIX = [
   {
     kind: "pi",
     format: "PI-YYYYMMDD-###",
-    producer: "Trace (allocateTraceIdentity)",
+    producer: TRACE_IDENTITY_PRODUCER,
     uniqueness: "Trace DB unique on ols_finance_pi.pi_no",
     centralResolvable: false,
     eanGs1: "n/a",

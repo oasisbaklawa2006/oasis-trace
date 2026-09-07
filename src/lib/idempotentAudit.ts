@@ -13,7 +13,8 @@ interface AuditLogRow {
 }
 
 /** Skip or no-op when an audit row with the same idempotency key already exists.
- *  Live mode requires Core RPC with DB uniqueness on (details->>'idempotency_key', entity_id). */
+ *  Live: trace_insert_handover_audit_v1 with Core DB uniqueness on
+ *  (details->>'idempotency_key', entity_id) — bounded read below is demo-only. */
 export async function insertIdempotentHandoverAudit(
   row: {
     action: string;

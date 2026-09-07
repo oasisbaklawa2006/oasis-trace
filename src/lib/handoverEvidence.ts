@@ -74,11 +74,14 @@ export async function buildHandoverEvidence(
   };
 }
 
-/** Recompute chain hash from evidence fields — verifies integrity. */
+/** Recompute chain hash from evidence fields — verifies software_chain_v1 only. */
 export async function verifyHandoverEvidence(
   evidence: HandoverEvidence,
   priorHash?: string,
 ): Promise<boolean> {
+  if (evidence.integrityClass !== HANDOVER_INTEGRITY_CLASS) {
+    return false;
+  }
   const content = JSON.stringify({
     stage: evidence.stage,
     entityType: evidence.entityType,
@@ -177,6 +180,36 @@ export function assertAcceptedHandoverEvidence(evidence: HandoverEvidence): void
   if (supabaseConfigured && !isAuthenticatedHandoverEvidence(evidence)) {
     throw new Error(
       "Handover evidence rejected: live mode requires core_signed_v1 authenticated evidence.",
+    );
+  }
+}
+
+/**
+ * Verify accepted handover evidence.
+ * Demo: software_chain_v1 client hash recompute.
+ * Live core_signed_v1: Core trace_verify_handover_evidence_v1 — fails closed when missing.
+ */
+export async function verifyAcceptedHandoverEvidence(
+  evidence: HandoverEvidence,
+  opts?: { priorHash?: string },
+): Promise<boolean> {
+  if (evidence.integrityClass === HANDOVER_INTEGRITY_CLASS) {
+    return verifyHandoverEvidence(evidence, opts?.priorHash);
+  }
+  if (!isAuthenticatedHandoverEvidence(evidence)) return false;
+  if (!supabaseConfigured) return false;
+
+  try {
+    const verified = await invokeTraceMutation<boolean>("trace_verify_handover_evidence_v1", {
+      p_evidence: evidence,
+      p_prior_hash: opts?.priorHash ?? null,
+    });
+    return verified === true;
+  } catch (err: unknown) {
+    if (!isRpcNotDeployedError(err)) throw err;
+    throw new Error(
+      "Trace operation rejected: trace_verify_handover_evidence_v1 is not deployed. "
+      + "Authenticated handover verification requires Core authority.",
     );
   }
 }

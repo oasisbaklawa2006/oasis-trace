@@ -88,4 +88,9 @@ export const traceMutations = {
       p_details: details,
       p_idempotency_key: idempotencyKey,
     }),
+  verifyHandoverEvidence: (evidence: HandoverEvidence, priorHash?: string) =>
+    invokeTraceMutation<boolean>("trace_verify_handover_evidence_v1", {
+      p_evidence: evidence,
+      p_prior_hash: priorHash ?? null,
+    }),
 };
