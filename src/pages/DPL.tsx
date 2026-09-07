@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { listTable } from "@/lib/data";
-import { num } from "@/lib/numbering";
+import { productionNum } from "@/lib/numbering";
 import { Printer, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { Barcode } from "@/components/Barcode";
@@ -73,7 +73,7 @@ export default function DPL() {
       // dpl_no is randomly generated (numbering.ts) and can collide under
       // concurrent multi-terminal use — retry with a fresh id on a
       // confirmed unique-constraint violation, bounded.
-      const dplNo = num.dpl();
+      const dplNo = await productionNum.dpl();
       const result = await traceMutations.createDpl({
         dpl_no: dplNo,
         order_ref: orderRef,

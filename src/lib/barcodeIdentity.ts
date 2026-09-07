@@ -122,7 +122,7 @@ export function isPreviewIdentity(value: string): boolean {
 
 /**
  * Deterministic Trace-owned identity allocation (monotonic per kind per day).
- * Does not allocate CTN-SO — use {@link deriveCentralCartonBarcode}.
+ * Demo/preview/tests only — use {@link allocateProductionIdentity} for live writes.
  */
 export function allocateTraceIdentity(
   kind: TraceAllocatableKind,

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildHandoverEvidence, verifyHandoverEvidence } from "./handoverEvidence";
+import {
+  assertSoftwareChainEvidence,
+  buildHandoverEvidence,
+  isAuthenticatedHandoverEvidence,
+  verifyHandoverEvidence,
+} from "./handoverEvidence";
 
 describe("handoverEvidence", () => {
   it("builds verifiable handover evidence", async () => {
@@ -22,5 +27,11 @@ describe("handoverEvidence", () => {
     );
     expect(second.chainHash).not.toBe(first.chainHash);
     expect(await verifyHandoverEvidence(second, first.chainHash)).toBe(true);
+  });
+
+  it("marks software_chain evidence as not authenticated", async () => {
+    const evidence = await buildHandoverEvidence("packing", "carton", "c-1", "CTN-1", {});
+    expect(isAuthenticatedHandoverEvidence(evidence)).toBe(false);
+    assertSoftwareChainEvidence(evidence);
   });
 });

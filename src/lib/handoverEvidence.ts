@@ -10,10 +10,12 @@ export type HandoverStage = "production" | "packing" | "dispatch" | "gate" | "fi
 
 export const HANDOVER_EVIDENCE_VERSION = "1.0";
 export const HANDOVER_INTEGRITY_CLASS = "software_chain_v1";
+/** Core-deployed authenticated evidence (server actor + timestamp binding). */
+export const HANDOVER_INTEGRITY_AUTHENTICATED = "core_signed_v1";
 
 export interface HandoverEvidence {
   version: typeof HANDOVER_EVIDENCE_VERSION;
-  integrityClass: typeof HANDOVER_INTEGRITY_CLASS;
+  integrityClass: typeof HANDOVER_INTEGRITY_CLASS | typeof HANDOVER_INTEGRITY_AUTHENTICATED;
   stage: HandoverStage;
   entityType: string;
   entityId: string;
@@ -88,4 +90,16 @@ export async function verifyHandoverEvidence(
   const chainInput = `${priorHash ?? "origin"}|${contentHash}`;
   const chainHash = await sha256Hex(chainInput);
   return chainHash === evidence.chainHash;
+}
+
+/** True only for Core-signed evidence — not client software_chain_v1 hashes. */
+export function isAuthenticatedHandoverEvidence(evidence: HandoverEvidence): boolean {
+  return evidence.integrityClass === HANDOVER_INTEGRITY_AUTHENTICATED;
+}
+
+/** Guard that evidence is software-chain class (not presented as authenticated). */
+export function assertSoftwareChainEvidence(evidence: HandoverEvidence): void {
+  if (evidence.integrityClass !== HANDOVER_INTEGRITY_CLASS) {
+    throw new Error(`Expected software_chain_v1 evidence, got ${evidence.integrityClass}`);
+  }
 }

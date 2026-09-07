@@ -1,4 +1,5 @@
 import { insertRow, isDuplicateError, listTable } from "@/lib/data";
+import { withAsyncLock } from "@/lib/asyncLock";
 import type { HandoverEvidence } from "@/lib/handoverEvidence";
 
 interface AuditLogRow {
@@ -20,15 +21,17 @@ export async function insertIdempotentHandoverAudit(
   },
 ): Promise<void> {
   const key = row.details.idempotency_key;
-  const recent = await listTable<AuditLogRow>("ols_audit_logs", { order: "created_at", limit: 200 });
-  const exists = recent.some(
-    log => log.details?.idempotency_key === key && log.entity_id === row.entity_id,
-  );
-  if (exists) return;
-  try {
-    await insertRow("ols_audit_logs", row);
-  } catch (err: unknown) {
-    if (isDuplicateError(err)) return;
-    throw err;
-  }
+  await withAsyncLock(`handover-audit:${key}:${row.entity_id}`, async () => {
+    const recent = await listTable<AuditLogRow>("ols_audit_logs", { order: "created_at", limit: 200 });
+    const exists = recent.some(
+      log => log.details?.idempotency_key === key && log.entity_id === row.entity_id,
+    );
+    if (exists) return;
+    try {
+      await insertRow("ols_audit_logs", row);
+    } catch (err: unknown) {
+      if (isDuplicateError(err)) return;
+      throw err;
+    }
+  });
 }

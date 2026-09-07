@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CentralPayloadPreview } from "@/components/CentralPayloadPreview";
 import { listTable } from "@/lib/data";
-import { num } from "@/lib/numbering";
+import { num, productionNum } from "@/lib/numbering";
 import { validateBarcodeIdentity } from "@/lib/barcodeIdentity";
 import { buildCartonMetadata, resolveCartonBarcodeDisplay } from "@/lib/barcodeCarton";
 import { supportsCentralBarcode } from "@/lib/scanContract";
@@ -93,7 +93,7 @@ export default function Cartonization() {
       // concurrent multi-terminal use — retry with a fresh id (and matching
       // metadata) on a confirmed unique-constraint violation, bounded.
       const c = await insertWithUniqueRetry<Carton>("ols_cartons", async () => {
-        const legacyNo = num.carton();
+        const legacyNo = await productionNum.carton();
         const cartonIndex = await allocateNextCartonIndex(orderRef);
         return {
           carton_no: legacyNo,

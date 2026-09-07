@@ -29,9 +29,9 @@ describe("idempotentAudit", () => {
       details: {
         idempotency_key: "finalize-carton:c-1",
         handover_evidence: {
-          version: "1.0",
-          integrityClass: "software_chain_v1",
-          stage: "packing",
+          version: "1.0" as const,
+          integrityClass: "software_chain_v1" as const,
+          stage: "packing" as const,
           entityType: "carton",
           entityId: "c-1",
           referenceNo: "CTN-1",
@@ -43,5 +43,40 @@ describe("idempotentAudit", () => {
       },
     });
     expect(insertRow).not.toHaveBeenCalled();
+  });
+
+  it("serializes concurrent inserts for the same idempotency key", async () => {
+    listTable.mockResolvedValue([]);
+    let inserts = 0;
+    insertRow.mockImplementation(async () => {
+      inserts += 1;
+      await new Promise(r => setTimeout(r, 20));
+      return { id: `audit-${inserts}` };
+    });
+    const row = {
+      action: "carton_sealed",
+      entity_type: "carton",
+      entity_id: "c-1",
+      details: {
+        idempotency_key: "finalize-carton:c-1",
+        handover_evidence: {
+          version: "1.0" as const,
+          integrityClass: "software_chain_v1" as const,
+          stage: "packing" as const,
+          entityType: "carton",
+          entityId: "c-1",
+          referenceNo: "CTN-1",
+          occurredAt: "2026-09-07T00:00:00.000Z",
+          metadata: {},
+          contentHash: "a",
+          chainHash: "b",
+        },
+      },
+    };
+    await Promise.all([
+      insertIdempotentHandoverAudit(row),
+      insertIdempotentHandoverAudit(row),
+    ]);
+    expect(insertRow).toHaveBeenCalledTimes(1);
   });
 });

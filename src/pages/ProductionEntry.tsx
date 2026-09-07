@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { listTable } from "@/lib/data";
-import { num } from "@/lib/numbering";
+import { num, productionNum } from "@/lib/numbering";
 import { LabelPreview } from "@/components/LabelPreview";
 import { Printer, Save } from "lucide-react";
 import { toast } from "sonner";
@@ -75,8 +75,9 @@ export default function ProductionEntry() {
     setIsSubmitting(true);
     setSubmitError(null);
     try {
+      const batchNo = await productionNum.batch();
       const batchInput = {
-        batch_no: form.batch_no,
+        batch_no: batchNo,
         product_id: form.product_id,
         department_id: form.department_id,
         shift: form.shift,
@@ -87,8 +88,8 @@ export default function ProductionEntry() {
       };
       const trayCount = trayCountRaw;
       const bestBefore = computeBestBefore(form.mfg_date, shelfLifeRaw);
-      const labelInputs = Array.from({ length: trayCount }, (_, i) => ({
-          label_no: num.productionLabel(),
+      const labelInputs = await Promise.all(Array.from({ length: trayCount }, async (_, i) => ({
+          label_no: await productionNum.productionLabel(),
           product_id: form.product_id,
           department_id: form.department_id,
           tray_serial: `T-${i + 1}`,
@@ -100,9 +101,9 @@ export default function ProductionEntry() {
           operator_name: form.operator_name,
           status: "active",
           metadata: { product_name: product?.name, sku: product?.sku, department: departments.find(d => d.id === form.department_id)?.name },
-      }));
+      })));
       const { labels: created } = await traceMutations.createProduction(
-        batchInput, labelInputs, `create-production:${form.batch_no}`,
+        batchInput, labelInputs, `create-production:${batchNo}`,
       );
       // Generate every tray's TSPL command (proves GENERATED) and best-effort
       // copy the WHOLE batch to the clipboard as one block — copying per-tray

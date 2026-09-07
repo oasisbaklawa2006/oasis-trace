@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { listTable } from "@/lib/data";
-import { num } from "@/lib/numbering";
+import { productionNum } from "@/lib/numbering";
 import { ScanBarcode, BadgeCheck, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { StatusPill } from "@/components/StatusPill";
@@ -58,7 +58,7 @@ export default function FinancePI() {
       const membership = validateCartonForPi(c.id, active, dplCartons);
       if (!membership.ok) { toast.error(membership.reason || "Carton rejected"); setScan(""); return; }
 
-      const piNo = active?.pi_no ?? num.pi();
+      const piNo = active?.pi_no ?? await productionNum.pi();
       const result = await traceMutations.addCartonToPi(
         c.id, active?.id ?? null, piNo, `pi-carton:${active?.id ?? piNo}:${c.id}`,
       );
