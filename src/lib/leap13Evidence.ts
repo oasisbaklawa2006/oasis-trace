@@ -26,7 +26,11 @@ function readRecords(): Leap13EvidenceRecord[] {
 
 function writeRecords(records: Leap13EvidenceRecord[]): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(records.slice(-MAX_RECORDS)));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(records.slice(-MAX_RECORDS)));
+  } catch {
+    // Evidence capture is best-effort — must not break scan/reload flows.
+  }
 }
 
 /** Capture a Leap13 UAT step when `VITE_LEAP13_UAT=1` or `?leap13_uat=1`. */

@@ -20,4 +20,16 @@ describe("leap13Evidence", () => {
     expect(JSON.parse(exportLeap13EvidenceJson())[0].step).toBe("scan");
     window.history.pushState({}, "", "/");
   });
+
+  it("does not throw when localStorage write fails", () => {
+    window.history.pushState({}, "", "/?leap13_uat=1");
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = () => {
+      throw new Error("QuotaExceededError");
+    };
+    expect(() => captureLeap13Evidence("gate", "scan", { ref: "SHP-1" })).not.toThrow();
+    expect(captureLeap13Evidence("gate", "scan", { ref: "SHP-1" })?.step).toBe("scan");
+    Storage.prototype.setItem = original;
+    window.history.pushState({}, "", "/");
+  });
 });

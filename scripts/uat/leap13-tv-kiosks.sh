@@ -20,5 +20,5 @@ cat <<'EOF'
 - Attach TV photo/video showing live header + counts with timestamp overlay.
 
 ## Software regression (no hardware)
-npm test -- src/lib/data.count.test.ts src/hooks/useSerializedPoll.test.ts 2>/dev/null || npm test -- src/lib/data.count.test.ts
+npm test -- src/lib/data.count.test.ts src/hooks/useSerializedPoll.test.ts
 EOF
