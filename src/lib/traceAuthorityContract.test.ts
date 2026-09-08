@@ -60,6 +60,7 @@ describe("traceAuthorityContract", () => {
       entityId: "c-1",
       referenceNo: "CTN-1",
       metadata: { labels: 1 },
+      actorId: "actor-core-1",
     });
     expect(evidence.integrityClass).toBe("core_signed_v1");
 

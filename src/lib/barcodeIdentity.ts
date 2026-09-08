@@ -123,7 +123,11 @@ export function isPreviewIdentity(value: string): boolean {
 
 /**
  * Deterministic Trace-owned identity allocation (monotonic per kind per day).
- * Demo/preview/tests only — use {@link allocateProductionIdentity} for live writes.
+ * Demo/preview/tests only.
+ *
+ * Live production batch/label identifiers must come from
+ * {@link createProductionWithAuthoritativeIds} (`trace_create_production_v1`).
+ * Other live identifiers use {@link allocateProductionIdentity} (`trace_allocate_identity_v1`).
  */
 export function allocateTraceIdentity(
   kind: TraceAllocatableKind,

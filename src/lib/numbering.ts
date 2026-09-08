@@ -40,10 +40,23 @@ export const num = {
   qrRef: (shippingNo: string) => deriveShippingQrRef(shippingNo),
 };
 
-/** Authoritative production allocation — fails closed when Core RPC is missing. */
+function rejectLiveProductionPreallocation(kind: "batch" | "production_label"): never {
+  throw new Error(
+    `productionNum.${kind === "batch" ? "batch" : "productionLabel"} is not for live production writes. `
+    + "Use createProductionWithAuthoritativeIds so trace_create_production_v1 assigns batch_no and label_no atomically.",
+  );
+}
+
+/** Authoritative allocation for non-production-create identifiers — fails closed when Core RPC is missing. */
 export const productionNum = {
-  productionLabel: () => allocateProductionIdentity("production_label"),
-  batch: () => allocateProductionIdentity("batch"),
+  productionLabel: () => {
+    if (supabaseConfigured) rejectLiveProductionPreallocation("production_label");
+    return allocateProductionIdentity("production_label");
+  },
+  batch: () => {
+    if (supabaseConfigured) rejectLiveProductionPreallocation("batch");
+    return allocateProductionIdentity("batch");
+  },
   carton: () => allocateProductionIdentity("legacy_carton"),
   dpl: () => allocateProductionIdentity("dpl"),
   pi: () => allocateProductionIdentity("pi"),

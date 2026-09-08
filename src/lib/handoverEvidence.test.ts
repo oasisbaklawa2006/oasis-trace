@@ -81,6 +81,7 @@ describe("handoverEvidence", () => {
       entityId: "c-1",
       referenceNo: "CTN-1",
       metadata: { labels: 2 },
+      actorId: "actor-core-1",
       priorHash: "prior",
     });
     expect(evidence.integrityClass).toBe(HANDOVER_INTEGRITY_AUTHENTICATED);
@@ -90,7 +91,7 @@ describe("handoverEvidence", () => {
       p_entity_id: "c-1",
       p_reference_no: "CTN-1",
       p_metadata: { labels: 2 },
-      p_actor_id: null,
+      p_actor_id: "actor-core-1",
       p_prior_hash: "prior",
     });
     assertAcceptedHandoverEvidence(evidence);
@@ -107,7 +108,36 @@ describe("handoverEvidence", () => {
       entityId: "lbl-1",
       referenceNo: "SHP-1",
       metadata: {},
+      actorId: "actor-core-1",
     })).rejects.toThrow(/not deployed/i);
+  });
+
+  it("requires authenticated actorId in live mode", async () => {
+    supabaseConfigured.value = true;
+    await expect(resolveHandoverEvidence({
+      stage: "packing",
+      entityType: "carton",
+      entityId: "c-1",
+      referenceNo: "CTN-1",
+      metadata: {},
+    })).rejects.toThrow(/authenticated actorId/i);
+  });
+
+  it("rejects client software_chain verification in live mode", async () => {
+    supabaseConfigured.value = true;
+    const evidence = {
+      version: "1.0" as const,
+      integrityClass: "software_chain_v1" as const,
+      stage: "packing" as const,
+      entityType: "carton",
+      entityId: "c-1",
+      referenceNo: "CTN-1",
+      occurredAt: "2026-09-07T00:00:00.000Z",
+      metadata: {},
+      contentHash: "a",
+      chainHash: "b",
+    };
+    expect(await verifyAcceptedHandoverEvidence(evidence)).toBe(false);
   });
 
   it("rejects software_chain evidence in live acceptance guard", async () => {

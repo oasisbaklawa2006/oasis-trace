@@ -146,6 +146,12 @@ export interface ResolveHandoverEvidenceInput {
 export async function resolveHandoverEvidence(
   input: ResolveHandoverEvidenceInput,
 ): Promise<HandoverEvidence> {
+  if (supabaseConfigured && (!input.actorId || input.actorId.length === 0)) {
+    throw new Error(
+      "Handover evidence rejected: live mode requires an authenticated actorId for Core signing.",
+    );
+  }
+
   if (!supabaseConfigured) {
     return buildHandoverEvidence(
       input.stage,
@@ -206,6 +212,7 @@ export async function verifyAcceptedHandoverEvidence(
   opts?: { priorHash?: string },
 ): Promise<boolean> {
   if (evidence.integrityClass === HANDOVER_INTEGRITY_CLASS) {
+    if (supabaseConfigured) return false;
     return verifyHandoverEvidence(evidence, opts?.priorHash);
   }
   if (!isAuthenticatedHandoverEvidence(evidence)) return false;
