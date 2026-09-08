@@ -3,8 +3,8 @@
  *
  * Core owns canonical order UUID truth. Trace reconciles `ols_orders_cache`
  * bindings so Central scan handoff can resolve `order_id` deterministically.
- * Live mode invokes governed Core RPC when deployed; demo mode applies
- * stable software-validation bindings only.
+ * Live mode invokes governed Core trace_reconcile_external_refs_v1 (Core #259);
+ * demo mode applies stable software-validation bindings only.
  */
 import { invokeTraceMutation, listTable, updateRow } from "@/lib/data";
 import { resolveCentralOrderId, type CentralOrderRef } from "@/lib/centralTraceContract";

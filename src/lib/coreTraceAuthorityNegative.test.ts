@@ -8,6 +8,7 @@ import {
 } from "./handoverEvidence";
 import { insertIdempotentHandoverAudit } from "./idempotentAudit";
 import { reconcileExternalRefs } from "./externalRefSync";
+import { allocateNextCartonIndex } from "./cartonIndex";
 import { isPermanentSubmitFailureReason } from "./centralTraceContract";
 
 const { invokeTraceMutation, listTable, updateRow } = vi.hoisted(() => ({
@@ -103,6 +104,15 @@ describe("Core #259 negative authority paths", () => {
       },
     })).rejects.toThrow(/core_signed_v1/i);
     expect(invokeTraceMutation).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when live carton index RPC is missing", async () => {
+    supabaseConfigured.value = true;
+    invokeTraceMutation.mockRejectedValueOnce(
+      Object.assign(new Error("missing rpc"), { message: "function trace_allocate_carton_index_v1() does not exist" }),
+    );
+    await expect(allocateNextCartonIndex("SO-1")).rejects.toThrow(/not deployed/i);
+    expect(listTable).not.toHaveBeenCalled();
   });
 
   it("fails closed when live external_ref reconcile RPC is missing", async () => {

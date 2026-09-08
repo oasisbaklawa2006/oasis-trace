@@ -1,7 +1,7 @@
 /**
  * Handover evidence chain resolution — links stage records via prior chainHash.
- * Server-side authenticated signing remains a Core prerequisite; this module
- * provides deterministic software-chain linking only.
+ * Live accepted evidence requires Core-authenticated signing (Core #259);
+ * demo uses deterministic software-chain linking only.
  */
 import { listTable } from "@/lib/data";
 import {

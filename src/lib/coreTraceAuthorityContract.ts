@@ -93,6 +93,7 @@ export const CORE_TRACE_RECERT_CONTRACT_SUITES = [
   "src/lib/productionIdentity.test.ts",
   "src/lib/handoverEvidence.test.ts",
   "src/lib/cartonSeal.test.ts",
+  "src/lib/cartonIndex.test.ts",
   "src/lib/idempotentAudit.test.ts",
   "src/lib/externalRefSync.test.ts",
   "src/lib/scanSubmitQueue.test.ts",

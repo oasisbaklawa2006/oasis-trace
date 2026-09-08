@@ -2,7 +2,7 @@ import { errorMessage } from "@/lib/utils";
 
 const MISSING_FUNCTION_RE = /function\s+[\w.]+\(\)\s+does not exist/;
 
-/** True when a Core RPC is missing or not yet deployed — safe to use guarded client fallback in demo. */
+/** True when a Core RPC is missing — live paths fail closed; demo uses local stores. */
 export function isRpcNotDeployedError(err: unknown): boolean {
   const msg = errorMessage(err, "").toLowerCase();
   const functionMissing =

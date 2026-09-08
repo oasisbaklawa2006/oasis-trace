@@ -86,7 +86,7 @@ export async function packLabelIntoCarton(
       if (!isRpcNotDeployedError(err)) throw err;
       throw new Error(
         "Trace operation rejected: trace_add_carton_content_v1 is not deployed. "
-        + "Deploy Core macro #557 before packing in live mode.",
+        + "Live packing requires Core authority (Core #259 / Production Migration Release #161).",
       );
     }
   }

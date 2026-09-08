@@ -1,4 +1,4 @@
-import { getMode, invokeTraceMutation, listTable } from "@/lib/data";
+import { invokeTraceMutation, listTable } from "@/lib/data";
 import { isRpcNotDeployedError } from "@/lib/rpcErrors";
 import { supabaseConfigured } from "@/lib/supabase";
 import type { Carton } from "@/lib/types";
@@ -12,7 +12,7 @@ function maxCartonIndexForOrder(cartons: Carton[], orderRef: string): number {
 
 /**
  * Allocate the next per-order carton index from authoritative server state.
- * Prefers Core RPC when deployed; otherwise reads live cartons only (no demo fallback).
+ * Live mode requires Core trace_allocate_carton_index_v1 (Core #259); demo uses local max+1.
  */
 export async function allocateNextCartonIndex(orderRef: string): Promise<number> {
   if (supabaseConfigured) {
@@ -21,15 +21,16 @@ export async function allocateNextCartonIndex(orderRef: string): Promise<number>
         p_order_ref: orderRef,
       });
       if (typeof index === "number" && index > 0) return index;
+      throw new Error(
+        "Trace operation rejected: trace_allocate_carton_index_v1 returned non-authoritative index.",
+      );
     } catch (err: unknown) {
       if (!isRpcNotDeployedError(err)) throw err;
+      throw new Error(
+        "Trace operation rejected: trace_allocate_carton_index_v1 is not deployed. "
+        + "Live carton index allocation requires Core authority (Core #259 / Production Migration Release #161).",
+      );
     }
-
-    const cartons = await listTable<Carton>("ols_cartons");
-    if (getMode() !== "live") {
-      throw new Error("Cannot allocate carton index from non-authoritative data source.");
-    }
-    return maxCartonIndexForOrder(cartons, orderRef) + 1;
   }
 
   const cartons = await listTable<Carton>("ols_cartons");
