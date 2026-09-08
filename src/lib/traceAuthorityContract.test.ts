@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { allocateProductionIdentity } from "./productionIdentity";
+import { createProductionWithAuthoritativeIds } from "./productionCreate";
 import {
   buildHandoverEvidence,
   resolveHandoverEvidence,
@@ -74,5 +75,43 @@ describe("traceAuthorityContract", () => {
     supabaseConfigured.value = true;
     await expect(buildHandoverEvidence("packing", "carton", "c-1", "CTN-1", {}))
       .rejects.toThrow(/resolveHandoverEvidence/i);
+  });
+
+  it("uses server-assigned production identifiers from trace_create_production_v1 only", async () => {
+    supabaseConfigured.value = true;
+    invokeTraceMutation.mockResolvedValueOnce({
+      batch: { id: "b-1", batch_no: "BAT-20260907-099", product_id: "p-1" },
+      labels: [{ id: "l-1", label_no: "PL-20260907-0999", batch_id: "b-1" }],
+    });
+    const result = await createProductionWithAuthoritativeIds(
+      {
+        product_id: "p-1",
+        department_id: "d-1",
+        shift: "A",
+        mfg_date: "2026-09-07",
+        shelf_life_days: 90,
+        qc_status: "pending",
+      },
+      [{
+        product_id: "p-1",
+        department_id: "d-1",
+        tray_serial: "T-1",
+        net_weight: 5,
+        gross_weight: 5.25,
+        mfg_date: "2026-09-07",
+        best_before: "2026-12-06",
+        qc_status: "pending",
+        status: "active",
+      }],
+      "create-production:authority-test",
+    );
+    expect(result.batch.batch_no).toBe("BAT-20260907-099");
+    expect(result.labels[0].label_no).toBe("PL-20260907-0999");
+    const createCall = invokeTraceMutation.mock.calls.find(([fn]) => fn === "trace_create_production_v1");
+    expect(createCall?.[1]).toEqual({
+      p_input: expect.not.objectContaining({ batch_no: expect.anything() }),
+      p_labels: [expect.not.objectContaining({ label_no: expect.anything() })],
+      p_idempotency_key: "create-production:authority-test",
+    });
   });
 });

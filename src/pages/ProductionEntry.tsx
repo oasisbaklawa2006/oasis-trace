@@ -6,7 +6,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { listTable } from "@/lib/data";
-import { num, productionNum } from "@/lib/numbering";
+import { createProductionWithAuthoritativeIds } from "@/lib/productionCreate";
+import { num } from "@/lib/numbering";
 import { LabelPreview } from "@/components/LabelPreview";
 import { Printer, Save } from "lucide-react";
 import { toast } from "sonner";
@@ -17,8 +18,6 @@ import { errorMessage } from "@/lib/utils";
 import { generateLabelCommandBatch, recordLabelGenerated, NO_PHYSICAL_PRINT_NOTE } from "@/lib/labelPrintLog";
 import { buildProductionLabelPayload } from "@/lib/labelPayloads";
 import { computeBestBefore } from "@/lib/dateMath";
-import { traceMutations } from "@/lib/traceMutations";
-
 export default function ProductionEntry() {
   const nav = useNavigate();
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -75,9 +74,7 @@ export default function ProductionEntry() {
     setIsSubmitting(true);
     setSubmitError(null);
     try {
-      const batchNo = await productionNum.batch();
       const batchInput = {
-        batch_no: batchNo,
         product_id: form.product_id,
         department_id: form.department_id,
         shift: form.shift,
@@ -88,23 +85,30 @@ export default function ProductionEntry() {
       };
       const trayCount = trayCountRaw;
       const bestBefore = computeBestBefore(form.mfg_date, shelfLifeRaw);
-      const labelInputs = await Promise.all(Array.from({ length: trayCount }, async (_, i) => ({
-          label_no: await productionNum.productionLabel(),
-          product_id: form.product_id,
-          department_id: form.department_id,
-          tray_serial: `T-${i + 1}`,
-          net_weight: netWeightRaw,
-          gross_weight: grossWeightRaw,
-          mfg_date: form.mfg_date,
-          best_before: bestBefore,
-          qc_status: form.qc_status,
-          operator_name: form.operator_name,
-          status: "active",
-          metadata: { product_name: product?.name, sku: product?.sku, department: departments.find(d => d.id === form.department_id)?.name },
-      })));
-      const { labels: created } = await traceMutations.createProduction(
-        batchInput, labelInputs, `create-production:${batchNo}`,
+      const labelInputs = Array.from({ length: trayCount }, (_, i) => ({
+        product_id: form.product_id,
+        department_id: form.department_id,
+        tray_serial: `T-${i + 1}`,
+        net_weight: netWeightRaw,
+        gross_weight: grossWeightRaw,
+        mfg_date: form.mfg_date,
+        best_before: bestBefore,
+        qc_status: form.qc_status,
+        operator_name: form.operator_name,
+        status: "active",
+        metadata: {
+          product_name: product?.name,
+          sku: product?.sku,
+          department: departments.find(d => d.id === form.department_id)?.name,
+        },
+      }));
+      const idempotencyKey = `create-production:${crypto.randomUUID()}`;
+      const { batch, labels: created } = await createProductionWithAuthoritativeIds(
+        batchInput,
+        labelInputs,
+        idempotencyKey,
       );
+      const batchNo = batch.batch_no;
       // Generate every tray's TSPL command (proves GENERATED) and best-effort
       // copy the WHOLE batch to the clipboard as one block — copying per-tray
       // would overwrite the clipboard each time, leaving only the last
