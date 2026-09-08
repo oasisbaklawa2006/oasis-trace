@@ -44,7 +44,7 @@ export default function GateScan() {
     setHistory(await listTable<GateScanRow>("ols_gate_scans", { order: "scanned_at", limit: 10 }));
   }
 
-  useEffect(() => { reload(); }, []);
+  useEffect(() => { void reload(); }, []);
 
   const processScan = useCallback(async (raw: string) => {
     if (processingRef.current) return;
@@ -79,7 +79,7 @@ export default function GateScan() {
           duplicate: flow.duplicate,
           idempotencyKey: flow.idempotencyKey,
         });
-        reload();
+        void reload();
         return;
       }
 
@@ -109,7 +109,7 @@ export default function GateScan() {
           duplicateDispatch,
         });
       });
-      reload();
+      void reload();
     } catch (err: unknown) {
       const msg = errorMessage(err, "Scan failed");
       setScanError(msg);
@@ -186,7 +186,7 @@ export default function GateScan() {
               aria-label="Gate scan barcode input"
               className="h-14 font-mono text-lg"
             />
-            <Button onClick={() => submit()} className="h-14 px-6 bg-gradient-primary text-primary-foreground"><ScanLine size={20} /></Button>
+            <Button onClick={() => { void submit(); }} className="h-14 px-6 bg-gradient-primary text-primary-foreground"><ScanLine size={20} /></Button>
             <Button variant="outline" className="h-14 px-3" onClick={() => { setFeedbackEnabled(!isFeedbackEnabled()); location.reload(); }} title="Toggle scan beep + vibration">
               {isFeedbackEnabled() ? <Volume2 size={18} /> : <VolumeX size={18} />}
             </Button>

@@ -1,9 +1,12 @@
 import { useEffect, useRef } from "react";
 
+/** Serialized poll tick — sync preferred; Promise return is also awaited. */
+export type SerializedPollTick = () => void | Promise<void>;
+
 /**
  * Poll on an interval without overlapping loads or stale response overwrites.
  */
-export function useSerializedPoll(load: () => Promise<void>, intervalMs: number): void {
+export function useSerializedPoll(load: SerializedPollTick, intervalMs: number): void {
   const loadRef = useRef(load);
 
   useEffect(() => {
@@ -15,19 +18,18 @@ export function useSerializedPoll(load: () => Promise<void>, intervalMs: number)
     let seq = 0;
     let inFlight = false;
 
-    async function run() {
+    const tick = (): void => {
       if (!active || inFlight) return;
       inFlight = true;
       const requestId = ++seq;
-      try {
-        await loadRef.current();
-      } finally {
-        if (requestId === seq) inFlight = false;
-      }
-    }
+      void Promise.resolve(loadRef.current())
+        .finally(() => {
+          if (requestId === seq) inFlight = false;
+        });
+    };
 
-    void run();
-    const timer = setInterval(() => { void run(); }, intervalMs);
+    tick();
+    const timer = setInterval(tick, intervalMs);
     return () => {
       active = false;
       clearInterval(timer);

@@ -12,17 +12,19 @@ export default function TvGate() {
   const [history, setHistory] = useState<GateScanRow[]>([]);
   const [latest, setLatest] = useState<GateScanRow | null>(null);
 
-  const load = useCallback(async () => {
-    const rows = await listTable<GateScanRow>("ols_gate_scans", { order: "scanned_at", limit: 20 });
-    setHistory(rows);
-    setLatest(rows[0] ?? null);
-    captureLeap13Evidence("tv-gate", "refresh", {
-      rows: rows.length,
-      latestResult: rows[0]?.result ?? null,
-    });
+  const poll = useCallback(() => {
+    void (async () => {
+      const rows = await listTable<GateScanRow>("ols_gate_scans", { order: "scanned_at", limit: 20 });
+      setHistory(rows);
+      setLatest(rows[0] ?? null);
+      captureLeap13Evidence("tv-gate", "refresh", {
+        rows: rows.length,
+        latestResult: rows[0]?.result ?? null,
+      });
+    })();
   }, []);
 
-  useSerializedPoll(load, REFRESH_MS);
+  useSerializedPoll(poll, REFRESH_MS);
 
   const greens = history.filter(h => h.result === "green").length;
   const reds = history.length - greens;

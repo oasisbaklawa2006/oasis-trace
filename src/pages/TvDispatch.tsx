@@ -17,33 +17,48 @@ export default function TvDispatch() {
   const [shippingReady, setShippingReady] = useState(0);
   const [dataSource, setDataSource] = useState<"live" | "demo">("demo");
 
-  const load = useCallback(async () => {
-    try {
-      const [packedCount, dispatchedCount, shippingReadyCount, recentCartons] = await Promise.all([
-        countTable("ols_cartons", { column: "status", op: "in", value: ["packed", "finance_received"] }),
-        countTable("ols_cartons", { column: "status", op: "eq", value: "dispatched" }),
-        countTable("ols_shipping_labels", { column: "status", op: "neq", value: "dispatched" }),
-        listTable<Carton>("ols_cartons", { order: "created_at", limit: DETAIL_LIMIT }),
-      ]);
-      if (supabaseConfigured && getMode() !== "live") return;
-      setPacked(packedCount);
-      setDispatched(dispatchedCount);
-      setShippingReady(shippingReadyCount);
-      setDetailCartons(recentCartons);
-      setDataSource(supabaseConfigured ? "live" : "demo");
-      captureLeap13Evidence("tv-dispatch", "refresh", {
-        packed: packedCount,
-        dispatched: dispatchedCount,
-        shippingReady: shippingReadyCount,
-        detailRows: recentCartons.length,
-        dataSource: supabaseConfigured ? "live" : "demo",
-      });
-    } catch {
-      // Discard partial refresh — do not commit mixed-source kiosk state.
-    }
+  const poll = useCallback(() => {
+    void (async () => {
+      try {
+        const packedCount = await countTable("ols_cartons", {
+          column: "status",
+          op: "in",
+          value: ["packed", "finance_received"],
+        });
+        const dispatchedCount = await countTable("ols_cartons", {
+          column: "status",
+          op: "eq",
+          value: "dispatched",
+        });
+        const shippingReadyCount = await countTable("ols_shipping_labels", {
+          column: "status",
+          op: "neq",
+          value: "dispatched",
+        });
+        const recentCartons = await listTable<Carton>("ols_cartons", {
+          order: "created_at",
+          limit: DETAIL_LIMIT,
+        });
+        if (supabaseConfigured && getMode() !== "live") return;
+        setPacked(packedCount);
+        setDispatched(dispatchedCount);
+        setShippingReady(shippingReadyCount);
+        setDetailCartons(recentCartons);
+        setDataSource(supabaseConfigured ? "live" : "demo");
+        captureLeap13Evidence("tv-dispatch", "refresh", {
+          packed: packedCount,
+          dispatched: dispatchedCount,
+          shippingReady: shippingReadyCount,
+          detailRows: recentCartons.length,
+          dataSource: supabaseConfigured ? "live" : "demo",
+        });
+      } catch {
+        // Discard partial refresh — do not commit mixed-source kiosk state.
+      }
+    })();
   }, []);
 
-  useSerializedPoll(load, REFRESH_MS);
+  useSerializedPoll(poll, REFRESH_MS);
 
   return (
     <div className="min-h-screen bg-background p-6 tv-surface">

@@ -21,7 +21,9 @@ describe("useSerializedPoll", () => {
       active -= 1;
     });
 
-    renderHook(() => useSerializedPoll(load, 100));
+    renderHook(() => {
+      useSerializedPoll(load, 100);
+    });
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
@@ -41,7 +43,9 @@ describe("useSerializedPoll", () => {
     const second = vi.fn(async () => {});
 
     const { rerender } = renderHook(
-      ({ fn }) => useSerializedPoll(fn, 1000),
+      ({ fn }) => {
+        useSerializedPoll(fn, 1000);
+      },
       { initialProps: { fn: first } },
     );
 
