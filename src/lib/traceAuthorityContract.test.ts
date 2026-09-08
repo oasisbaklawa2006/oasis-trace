@@ -2,9 +2,14 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { allocateProductionIdentity } from "./productionIdentity";
 import { createProductionWithAuthoritativeIds } from "./productionCreate";
 import {
+  CORE_TRACE_AUTHORITY_MERGE_SHA,
+  CORE_TRACE_HANDOVER_ACTIONS,
+} from "./coreTraceAuthorityContract";
+import {
   buildHandoverEvidence,
   resolveHandoverEvidence,
   verifyAcceptedHandoverEvidence,
+  verifyHandoverForCartonFinalize,
 } from "./handoverEvidence";
 
 const { invokeTraceMutation } = vi.hoisted(() => ({
@@ -69,7 +74,38 @@ describe("traceAuthorityContract", () => {
     expect(invokeTraceMutation).toHaveBeenNthCalledWith(2, "trace_verify_handover_evidence_v1", {
       p_evidence: signed,
       p_prior_hash: null,
+      p_expected_action: null,
+      p_enforce_consumption: false,
     });
+  });
+
+  it("binds carton finalize pre-check to Core #259 verify contract", async () => {
+    supabaseConfigured.value = true;
+    const signed = {
+      version: "1.0" as const,
+      integrityClass: "core_signed_v1" as const,
+      stage: "packing" as const,
+      entityType: "carton",
+      entityId: "c-1",
+      referenceNo: "CTN-1",
+      actorId: "actor-core-1",
+      occurredAt: "2026-09-07T12:00:00.000Z",
+      metadata: {},
+      contentHash: "signed-content",
+      chainHash: "signed-chain",
+    };
+    invokeTraceMutation.mockResolvedValueOnce(true);
+    await expect(verifyHandoverForCartonFinalize(signed, { priorHash: "prior" })).resolves.toBe(true);
+    expect(invokeTraceMutation).toHaveBeenCalledWith("trace_verify_handover_evidence_v1", {
+      p_evidence: signed,
+      p_prior_hash: "prior",
+      p_expected_action: CORE_TRACE_HANDOVER_ACTIONS.cartonFinalized,
+      p_enforce_consumption: false,
+    });
+  });
+
+  it("pins recertification to Core #259 merge SHA", () => {
+    expect(CORE_TRACE_AUTHORITY_MERGE_SHA).toBe("c89c538c83eeefcd116c67f06bf86869ff63b2e3");
   });
 
   it("blocks client hash construction in configured live mode", async () => {

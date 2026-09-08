@@ -228,6 +228,8 @@ describe("handoverEvidence", () => {
     expect(invokeTraceMutation).toHaveBeenCalledWith("trace_verify_handover_evidence_v1", {
       p_evidence: signed,
       p_prior_hash: "prior",
+      p_expected_action: null,
+      p_enforce_consumption: false,
     });
   });
 

@@ -1,7 +1,7 @@
 import {
   assertAcceptedHandoverEvidence,
   resolveHandoverEvidence,
-  verifyAcceptedHandoverEvidence,
+  verifyHandoverForCartonFinalize,
   type HandoverEvidence,
 } from "@/lib/handoverEvidence";
 import { resolvePriorHandoverChainHash } from "@/lib/handoverChain";
@@ -26,10 +26,17 @@ export interface SealCartonResult {
 }
 
 /**
- * Seal carton via governed Core RPC and persist idempotent handover audit.
- * Core may absorb evidence atomically when `p_handover_evidence` is deployed.
+ * Seal carton via governed Core RPC with evidence-bearing finalisation.
+ * Live: trace_finalize_carton_v1 (Core #259 7-arg) verifies and persists evidence atomically;
+ * demo keeps separate idempotent audit insert.
  */
 export async function sealCartonWithHandover(input: SealCartonInput): Promise<SealCartonResult> {
+  if (supabaseConfigured && (!input.actorId || input.actorId.length === 0)) {
+    throw new Error(
+      "Carton seal rejected: live mode requires an authenticated actorId for Core handover signing.",
+    );
+  }
+
   const idempotencyKey = `finalize-carton:${input.carton.id}`;
   const priorHash = await resolvePriorHandoverChainHash("carton", input.carton.id, { scopedOnly: true });
   const evidence = await resolveHandoverEvidence({
@@ -49,9 +56,11 @@ export async function sealCartonWithHandover(input: SealCartonInput): Promise<Se
   assertAcceptedHandoverEvidence(evidence);
 
   if (supabaseConfigured) {
-    const verified = await verifyAcceptedHandoverEvidence(evidence, { priorHash });
+    const verified = await verifyHandoverForCartonFinalize(evidence, { priorHash });
     if (!verified) {
-      throw new Error("Handover evidence rejected: Core verification failed for core_signed_v1 evidence.");
+      throw new Error(
+        "Handover evidence rejected: Core verification failed for trace_carton_finalized binding.",
+      );
     }
   }
 
@@ -64,16 +73,18 @@ export async function sealCartonWithHandover(input: SealCartonInput): Promise<Se
     { handoverEvidence: evidence, actorId: input.actorId },
   );
 
-  await insertIdempotentHandoverAudit({
-    action: "carton_sealed",
-    entity_type: "carton",
-    entity_id: input.carton.id,
-    details: {
-      carton_no: input.carton.carton_no,
-      handover_evidence: evidence,
-      idempotency_key: idempotencyKey,
-    },
-  });
+  if (!supabaseConfigured) {
+    await insertIdempotentHandoverAudit({
+      action: "carton_sealed",
+      entity_type: "carton",
+      entity_id: input.carton.id,
+      details: {
+        carton_no: input.carton.carton_no,
+        handover_evidence: evidence,
+        idempotency_key: idempotencyKey,
+      },
+    });
+  }
 
   return { carton: sealed, evidence, idempotencyKey };
 }

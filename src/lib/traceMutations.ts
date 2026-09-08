@@ -88,9 +88,14 @@ export const traceMutations = {
       p_details: details,
       p_idempotency_key: idempotencyKey,
     }),
-  verifyHandoverEvidence: (evidence: HandoverEvidence, priorHash?: string) =>
+  verifyHandoverEvidence: (
+    evidence: HandoverEvidence,
+    opts?: { priorHash?: string; expectedAction?: string; enforceConsumption?: boolean },
+  ) =>
     invokeTraceMutation<boolean>("trace_verify_handover_evidence_v1", {
       p_evidence: evidence,
-      p_prior_hash: priorHash ?? null,
+      p_prior_hash: opts?.priorHash ?? null,
+      p_expected_action: opts?.expectedAction ?? null,
+      p_enforce_consumption: opts?.enforceConsumption ?? false,
     }),
 };

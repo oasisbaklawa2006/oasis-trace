@@ -7,6 +7,9 @@
  * Physical custody and scanner UAT remain Leap13.
  */
 import { invokeTraceMutation } from "@/lib/data";
+import {
+  CORE_TRACE_HANDOVER_ACTIONS,
+} from "@/lib/coreTraceAuthorityContract";
 import { isRpcNotDeployedError } from "@/lib/rpcErrors";
 import { supabaseConfigured } from "@/lib/supabase";
 export type HandoverStage = "production" | "packing" | "dispatch" | "gate" | "finance";
@@ -202,6 +205,14 @@ export function assertAcceptedHandoverEvidence(evidence: HandoverEvidence): void
   }
 }
 
+export interface VerifyHandoverEvidenceOpts {
+  priorHash?: string;
+  /** Core #259 p_expected_action — required when enforceConsumption is true. */
+  expectedAction?: string;
+  /** Core #259 p_enforce_consumption — stage/action binding and single-use checks. */
+  enforceConsumption?: boolean;
+}
+
 /**
  * Verify accepted handover evidence.
  * Demo: software_chain_v1 client hash recompute.
@@ -209,7 +220,7 @@ export function assertAcceptedHandoverEvidence(evidence: HandoverEvidence): void
  */
 export async function verifyAcceptedHandoverEvidence(
   evidence: HandoverEvidence,
-  opts?: { priorHash?: string },
+  opts?: VerifyHandoverEvidenceOpts,
 ): Promise<boolean> {
   if (evidence.integrityClass === HANDOVER_INTEGRITY_CLASS) {
     if (supabaseConfigured) return false;
@@ -222,6 +233,8 @@ export async function verifyAcceptedHandoverEvidence(
     const verified = await invokeTraceMutation<boolean>("trace_verify_handover_evidence_v1", {
       p_evidence: evidence,
       p_prior_hash: opts?.priorHash ?? null,
+      p_expected_action: opts?.expectedAction ?? null,
+      p_enforce_consumption: opts?.enforceConsumption ?? false,
     });
     return verified === true;
   } catch (err: unknown) {
@@ -231,4 +244,16 @@ export async function verifyAcceptedHandoverEvidence(
       + "Authenticated handover verification requires Core authority.",
     );
   }
+}
+
+/** Pre-finalize verification — binding check without single-use consumption. */
+export async function verifyHandoverForCartonFinalize(
+  evidence: HandoverEvidence,
+  opts?: { priorHash?: string },
+): Promise<boolean> {
+  return verifyAcceptedHandoverEvidence(evidence, {
+    priorHash: opts?.priorHash,
+    expectedAction: CORE_TRACE_HANDOVER_ACTIONS.cartonFinalized,
+    enforceConsumption: false,
+  });
 }
