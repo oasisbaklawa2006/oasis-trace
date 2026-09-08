@@ -28,9 +28,10 @@ describe("coreTraceAuthorityContract", () => {
     expect(CORE_TRACE_HANDOVER_ACTIONS.cartonFinalized).toBe("trace_carton_finalized");
   });
 
-  it("does not claim production authority until migration release succeeds", () => {
-    expect(CORE_TRACE_AUTHORITY_CERTIFICATION.status).toBe("pending_production_migration");
+  it("records production migration deployment after Core release #161", () => {
+    expect(CORE_TRACE_AUTHORITY_CERTIFICATION.status).toBe("production_migration_deployed");
     expect(CORE_TRACE_AUTHORITY_CERTIFICATION.productionRelease).toBe(161);
+    expect(CORE_TRACE_AUTHORITY_CERTIFICATION.productionReleaseRunId).toBe(34188983863);
     expect(CORE_TRACE_AUTHORITY_CERTIFICATION.coreMergeSha).toBe(CORE_TRACE_AUTHORITY_MERGE_SHA);
   });
 
