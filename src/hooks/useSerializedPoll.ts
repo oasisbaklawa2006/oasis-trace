@@ -23,6 +23,9 @@ export function useSerializedPoll(load: SerializedPollTick, intervalMs: number):
       inFlight = true;
       const requestId = ++seq;
       void Promise.resolve(loadRef.current())
+        .catch(() => {
+          // Contain load failures so kiosk polling continues serialized.
+        })
         .finally(() => {
           if (requestId === seq) inFlight = false;
         });

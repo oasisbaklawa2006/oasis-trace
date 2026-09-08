@@ -60,4 +60,24 @@ describe("useSerializedPoll", () => {
     });
     expect(second).toHaveBeenCalled();
   });
+
+  it("contains rejected loads and allows the next tick to run", async () => {
+    const load = vi.fn()
+      .mockRejectedValueOnce(new Error("poll failed"))
+      .mockResolvedValueOnce(undefined);
+
+    renderHook(() => {
+      useSerializedPoll(load, 100);
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(load).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    expect(load).toHaveBeenCalledTimes(2);
+  });
 });
