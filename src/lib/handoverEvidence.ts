@@ -1,0 +1,259 @@
+/**
+ * Immutable handover evidence — deterministic proof binding for
+ * production / packing / dispatch / gate / finance stages.
+ *
+ * Software integrity chain (SHA-256) is demo/preview/tests only.
+ * Live acceptance requires Core `trace_sign_handover_evidence_v1` (core_signed_v1).
+ * Physical custody and scanner UAT remain Leap13.
+ */
+import { invokeTraceMutation } from "@/lib/data";
+import {
+  CORE_TRACE_HANDOVER_ACTIONS,
+} from "@/lib/coreTraceAuthorityContract";
+import { isRpcNotDeployedError } from "@/lib/rpcErrors";
+import { supabaseConfigured } from "@/lib/supabase";
+export type HandoverStage = "production" | "packing" | "dispatch" | "gate" | "finance";
+
+export const HANDOVER_EVIDENCE_VERSION = "1.0";
+export const HANDOVER_INTEGRITY_CLASS = "software_chain_v1";
+/** Core-deployed authenticated evidence (server actor + timestamp binding). */
+export const HANDOVER_INTEGRITY_AUTHENTICATED = "core_signed_v1";
+
+export interface HandoverEvidence {
+  version: typeof HANDOVER_EVIDENCE_VERSION;
+  integrityClass: typeof HANDOVER_INTEGRITY_CLASS | typeof HANDOVER_INTEGRITY_AUTHENTICATED;
+  stage: HandoverStage;
+  entityType: string;
+  entityId: string;
+  referenceNo: string;
+  actorId?: string;
+  occurredAt: string;
+  metadata: Record<string, unknown>;
+  contentHash: string;
+  chainHash: string;
+}
+
+async function sha256Hex(input: string): Promise<string> {
+  const data = new TextEncoder().encode(input);
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hash))
+    .map(b => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+export async function buildHandoverEvidence(
+  stage: HandoverStage,
+  entityType: string,
+  entityId: string,
+  referenceNo: string,
+  metadata: Record<string, unknown>,
+  opts?: { actorId?: string; priorHash?: string },
+): Promise<HandoverEvidence> {
+  if (supabaseConfigured) {
+    throw new Error(
+      "buildHandoverEvidence is demo/preview only when Supabase is configured. "
+      + "Use resolveHandoverEvidence for authoritative handover signing.",
+    );
+  }
+  const occurredAt = new Date().toISOString();
+  const content = JSON.stringify({
+    stage,
+    entityType,
+    entityId,
+    referenceNo,
+    metadata,
+    occurredAt,
+    actorId: opts?.actorId ?? null,
+  });
+  const contentHash = await sha256Hex(content);
+  const chainInput = `${opts?.priorHash ?? "origin"}|${contentHash}`;
+  const chainHash = await sha256Hex(chainInput);
+  return {
+    version: HANDOVER_EVIDENCE_VERSION,
+    integrityClass: HANDOVER_INTEGRITY_CLASS,
+    stage,
+    entityType,
+    entityId,
+    referenceNo,
+    actorId: opts?.actorId,
+    occurredAt,
+    metadata,
+    contentHash,
+    chainHash,
+  };
+}
+
+/** Recompute chain hash from evidence fields — demo/preview software_chain_v1 only. */
+export async function verifyHandoverEvidence(
+  evidence: HandoverEvidence,
+  priorHash?: string,
+): Promise<boolean> {
+  if (supabaseConfigured) {
+    throw new Error(
+      "verifyHandoverEvidence is demo/preview only when Supabase is configured. "
+      + "Use verifyAcceptedHandoverEvidence for authoritative verification.",
+    );
+  }
+  if (evidence.integrityClass !== HANDOVER_INTEGRITY_CLASS) {
+    return false;
+  }
+  const content = JSON.stringify({
+    stage: evidence.stage,
+    entityType: evidence.entityType,
+    entityId: evidence.entityId,
+    referenceNo: evidence.referenceNo,
+    metadata: evidence.metadata,
+    occurredAt: evidence.occurredAt,
+    actorId: evidence.actorId ?? null,
+  });
+  const contentHash = await sha256Hex(content);
+  if (contentHash !== evidence.contentHash) return false;
+  const chainInput = `${priorHash ?? "origin"}|${contentHash}`;
+  const chainHash = await sha256Hex(chainInput);
+  return chainHash === evidence.chainHash;
+}
+
+/** True only for Core-signed evidence — not client software_chain_v1 hashes. */
+export function isAuthenticatedHandoverEvidence(evidence: HandoverEvidence): boolean {
+  return evidence.integrityClass === HANDOVER_INTEGRITY_AUTHENTICATED
+    && typeof evidence.chainHash === "string"
+    && evidence.chainHash.length > 0
+    && typeof evidence.occurredAt === "string"
+    && evidence.occurredAt.length > 0
+    && typeof evidence.actorId === "string"
+    && evidence.actorId.length > 0;
+}
+
+/** Guard that evidence is software-chain class (not presented as authenticated). */
+export function assertSoftwareChainEvidence(evidence: HandoverEvidence): void {
+  if (evidence.integrityClass !== HANDOVER_INTEGRITY_CLASS) {
+    throw new Error(`Expected software_chain_v1 evidence, got ${evidence.integrityClass}`);
+  }
+}
+
+export interface ResolveHandoverEvidenceInput {
+  stage: HandoverStage;
+  entityType: string;
+  entityId: string;
+  referenceNo: string;
+  metadata: Record<string, unknown>;
+  actorId?: string;
+  priorHash?: string;
+}
+
+/**
+ * Resolve handover evidence for persistence.
+ * Demo: software_chain_v1 (client hash chain).
+ * Live: Core-authenticated core_signed_v1 — fails closed when signing RPC is missing.
+ */
+export async function resolveHandoverEvidence(
+  input: ResolveHandoverEvidenceInput,
+): Promise<HandoverEvidence> {
+  if (supabaseConfigured && (!input.actorId || input.actorId.length === 0)) {
+    throw new Error(
+      "Handover evidence rejected: live mode requires an authenticated actorId for Core signing.",
+    );
+  }
+
+  if (!supabaseConfigured) {
+    return buildHandoverEvidence(
+      input.stage,
+      input.entityType,
+      input.entityId,
+      input.referenceNo,
+      input.metadata,
+      { actorId: input.actorId, priorHash: input.priorHash },
+    );
+  }
+
+  try {
+    const evidence = await invokeTraceMutation<HandoverEvidence>(
+      "trace_sign_handover_evidence_v1",
+      {
+        p_stage: input.stage,
+        p_entity_type: input.entityType,
+        p_entity_id: input.entityId,
+        p_reference_no: input.referenceNo,
+        p_metadata: input.metadata,
+        p_actor_id: input.actorId ?? null,
+        p_prior_hash: input.priorHash ?? null,
+      },
+    );
+    if (
+      evidence
+      && typeof evidence === "object"
+      && isAuthenticatedHandoverEvidence(evidence)
+    ) {
+      return evidence;
+    }
+    throw new Error("Invalid handover evidence response from trace_sign_handover_evidence_v1");
+  } catch (err: unknown) {
+    if (!isRpcNotDeployedError(err)) throw err;
+    throw new Error(
+      "Trace operation rejected: trace_sign_handover_evidence_v1 is not deployed. "
+      + "Accepted handover evidence requires Core authenticated signing.",
+    );
+  }
+}
+
+/** Reject client software-chain evidence when live backend is configured. */
+export function assertAcceptedHandoverEvidence(evidence: HandoverEvidence): void {
+  if (supabaseConfigured && !isAuthenticatedHandoverEvidence(evidence)) {
+    throw new Error(
+      "Handover evidence rejected: live mode requires core_signed_v1 authenticated evidence.",
+    );
+  }
+}
+
+export interface VerifyHandoverEvidenceOpts {
+  priorHash?: string;
+  /** Core #259 p_expected_action — required when enforceConsumption is true. */
+  expectedAction?: string;
+  /** Core #259 p_enforce_consumption — stage/action binding and single-use checks. */
+  enforceConsumption?: boolean;
+}
+
+/**
+ * Verify accepted handover evidence.
+ * Demo: software_chain_v1 client hash recompute.
+ * Live core_signed_v1: Core trace_verify_handover_evidence_v1 — fails closed when missing.
+ */
+export async function verifyAcceptedHandoverEvidence(
+  evidence: HandoverEvidence,
+  opts?: VerifyHandoverEvidenceOpts,
+): Promise<boolean> {
+  if (evidence.integrityClass === HANDOVER_INTEGRITY_CLASS) {
+    if (supabaseConfigured) return false;
+    return verifyHandoverEvidence(evidence, opts?.priorHash);
+  }
+  if (!isAuthenticatedHandoverEvidence(evidence)) return false;
+  if (!supabaseConfigured) return false;
+
+  try {
+    const verified = await invokeTraceMutation<boolean>("trace_verify_handover_evidence_v1", {
+      p_evidence: evidence,
+      p_prior_hash: opts?.priorHash ?? null,
+      p_expected_action: opts?.expectedAction ?? null,
+      p_enforce_consumption: opts?.enforceConsumption ?? false,
+    });
+    return verified === true;
+  } catch (err: unknown) {
+    if (!isRpcNotDeployedError(err)) throw err;
+    throw new Error(
+      "Trace operation rejected: trace_verify_handover_evidence_v1 is not deployed. "
+      + "Authenticated handover verification requires Core authority.",
+    );
+  }
+}
+
+/** Pre-finalize verification — binding check without single-use consumption. */
+export async function verifyHandoverForCartonFinalize(
+  evidence: HandoverEvidence,
+  opts?: { priorHash?: string },
+): Promise<boolean> {
+  return verifyAcceptedHandoverEvidence(evidence, {
+    priorHash: opts?.priorHash,
+    expectedAction: CORE_TRACE_HANDOVER_ACTIONS.cartonFinalized,
+    enforceConsumption: false,
+  });
+}

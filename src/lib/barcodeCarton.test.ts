@@ -19,4 +19,10 @@ describe("barcodeCarton", () => {
     expect(m.central_barcode).toBe("CTN-SO-2026-0001");
     expect(m.legacy_carton_no).toBe("CTN-20260602-0099");
   });
+
+  it("does not allocate phantom legacy barcode when number is absent", () => {
+    const d = resolveCartonBarcodeDisplay("SO-2026-0001");
+    expect(d.legacyBarcode).toBe("");
+    expect(d.labelBarcode).toBe("CTN-SO-2026-0001");
+  });
 });

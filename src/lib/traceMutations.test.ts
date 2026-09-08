@@ -24,6 +24,57 @@ describe("governed Trace mutation client", () => {
     });
   });
 
+  it("routes carton seal through Core finalize RPC with idempotency key", async () => {
+    invoke.mockResolvedValue({ id: "carton-1", status: "packed" });
+    const { traceMutations } = await import("./traceMutations");
+    await traceMutations.finalizeCarton("carton-1", 5, 5.25, true, "finalize-carton:carton-1");
+    expect(invoke).toHaveBeenCalledWith("trace_finalize_carton_v1", {
+      p_carton_id: "carton-1",
+      p_net_weight: 5,
+      p_gross_weight: 5.25,
+      p_copied_to_clipboard: true,
+      p_idempotency_key: "finalize-carton:carton-1",
+      p_handover_evidence: null,
+      p_actor_id: null,
+    });
+  });
+
+  it("routes carton content pack through governed add RPC", async () => {
+    invoke.mockResolvedValue({ id: "content-1", carton_id: "carton-1", production_label_id: "label-1" });
+    const { traceMutations } = await import("./traceMutations");
+    await traceMutations.addCartonContent("carton-1", "label-1", "carton-pack:carton-1:label-1");
+    expect(invoke).toHaveBeenCalledWith("trace_add_carton_content_v1", {
+      p_carton_id: "carton-1",
+      p_production_label_id: "label-1",
+      p_idempotency_key: "carton-pack:carton-1:label-1",
+    });
+  });
+
+  it("forwards handover evidence payload to finalize RPC when provided", async () => {
+    invoke.mockResolvedValue({ id: "carton-1", status: "packed" });
+    const evidence = {
+      version: "1.0" as const,
+      integrityClass: "software_chain_v1" as const,
+      stage: "packing" as const,
+      entityType: "carton",
+      entityId: "carton-1",
+      referenceNo: "CTN-1",
+      occurredAt: "2026-09-07T00:00:00.000Z",
+      metadata: {},
+      contentHash: "abc",
+      chainHash: "def",
+    };
+    const { traceMutations } = await import("./traceMutations");
+    await traceMutations.finalizeCarton("carton-1", 5, 5.25, true, "finalize-carton:carton-1", {
+      handoverEvidence: evidence,
+      actorId: "user-1",
+    });
+    expect(invoke).toHaveBeenCalledWith("trace_finalize_carton_v1", expect.objectContaining({
+      p_handover_evidence: evidence,
+      p_actor_id: "user-1",
+    }));
+  });
+
   it("routes printer settings saves through Core authority instead of raw ols_printers updates", async () => {
     const settings = { darkness: 8, speed: 4, gapMm: 3, dpi: 203 };
     invoke.mockResolvedValue({ id: "printer-1", settings });

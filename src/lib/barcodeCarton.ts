@@ -1,5 +1,4 @@
 import { generateCartonOrderBarcode, supportsCentralBarcode } from "./scanContract";
-import { num } from "./numbering";
 
 export interface CartonBarcodeDisplay {
   mode: "central" | "legacy";
@@ -14,7 +13,7 @@ export function resolveCartonBarcodeDisplay(
   legacyCartonNo?: string,
   metadata?: { central_barcode?: string; legacy_carton_no?: string; barcode_mode?: string },
 ): CartonBarcodeDisplay {
-  const legacy = legacyCartonNo || metadata?.legacy_carton_no || num.carton();
+  const legacy = legacyCartonNo || metadata?.legacy_carton_no || null;
   const central =
     metadata?.central_barcode ||
     (supportsCentralBarcode(orderNumber) ? generateCartonOrderBarcode(orderNumber) : null);
@@ -22,8 +21,8 @@ export function resolveCartonBarcodeDisplay(
   return {
     mode,
     centralBarcode: central,
-    legacyBarcode: legacy,
-    labelBarcode: central ?? legacy,
+    legacyBarcode: legacy ?? "",
+    labelBarcode: central ?? legacy ?? "",
   };
 }
 

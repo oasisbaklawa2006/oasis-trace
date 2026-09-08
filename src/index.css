@@ -118,6 +118,9 @@
   /* Mobile / handheld scanner mode — large tap targets, big result text. */
   .ols-fast-scan input { @apply h-16 text-2xl; }
   .ols-fast-scan button { @apply h-16 text-lg; }
+  /* TV kiosk surfaces — high-contrast, large type for wall displays. */
+  .tv-surface { @apply text-foreground; }
+  .tv-surface h1 { @apply tracking-tight; }
 }
 
 /* Print styles — A4 dispatch bundles & DPL */

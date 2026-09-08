@@ -25,6 +25,8 @@ import Reprints from "./pages/Reprints";
 const Reports = lazy(() => import("./pages/Reports"));
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
+import TvGate from "./pages/TvGate";
+import TvDispatch from "./pages/TvDispatch";
 
 const queryClient = new QueryClient();
 
@@ -59,6 +61,8 @@ const App = () => (
               <Route path="/reprints" element={<Reprints />} />
               <Route path="/reports" element={<ReportsLazy />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/tv/gate" element={<TvGate />} />
+              <Route path="/tv/dispatch" element={<TvDispatch />} />
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>

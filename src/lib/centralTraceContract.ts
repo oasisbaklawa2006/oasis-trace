@@ -69,7 +69,7 @@ export const CENTRAL_TRACE_PRODUCER_CONSUMER_MATRIX = [
   {
     surface: "legacy_carton_barcode",
     identifier: "CTN-YYYYMMDD-####",
-    producer: "Trace (numbering.num.carton — legacy mode only)",
+    producer: "Core trace_allocate_identity_v1 (live) / Trace preview allocator (demo)",
     consumer: "Trace gate (shipping QR path); not Central CTN-SO ingest",
     authBoundary: "Trace-only legacy gate; no Central submit",
     idempotencyKey: "n/a (legacy path)",

@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { listTable } from "@/lib/data";
-import { num } from "@/lib/numbering";
+import { productionNum } from "@/lib/numbering";
 import { ScanBarcode, BadgeCheck, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { StatusPill } from "@/components/StatusPill";
@@ -13,6 +13,7 @@ import type { Carton, CartonContent, DplCarton, FinancePi, FinancePiCarton, Prod
 import { errorMessage } from "@/lib/utils";
 import { rollupBySku } from "@/lib/piRollup";
 import { validateCartonForPi } from "@/lib/dplMembership";
+import { validatePackedCartonForDownstream } from "@/lib/packingContract";
 import { traceMutations } from "@/lib/traceMutations";
 
 export default function FinancePI() {
@@ -46,7 +47,8 @@ export default function FinancePI() {
       const code = scan.trim();
       if (!code) return;
       const c = cartons.find(x => x.carton_no === code);
-      if (!c) { toast.error("Carton not found"); return; }
+      const packedCheck = validatePackedCartonForDownstream(c);
+      if (!packedCheck.ok || !c) { toast.error(packedCheck.message || "Carton not found"); setScan(""); return; }
 
       // ols_dpl_cartons is the authoritative DPL membership — a carton must
       // genuinely be linked to a DPL to enter a Finance PI (fail closed),
@@ -56,7 +58,7 @@ export default function FinancePI() {
       const membership = validateCartonForPi(c.id, active, dplCartons);
       if (!membership.ok) { toast.error(membership.reason || "Carton rejected"); setScan(""); return; }
 
-      const piNo = active?.pi_no ?? num.pi();
+      const piNo = active?.pi_no ?? await productionNum.pi();
       const result = await traceMutations.addCartonToPi(
         c.id, active?.id ?? null, piNo, `pi-carton:${active?.id ?? piNo}:${c.id}`,
       );

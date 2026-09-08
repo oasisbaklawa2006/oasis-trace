@@ -11,12 +11,29 @@ import {
   isMuted, setMuted,
   isFeedbackEnabled, setFeedbackEnabled,
 } from "@/lib/scanFeedback";
-import { Volume2, VolumeX, ShieldAlert } from "lucide-react";
+import { Volume2, VolumeX, ShieldAlert, Link2 } from "lucide-react";
+import { reconcileExternalRefs, type ReconciliationReport } from "@/lib/externalRefSync";
 
 export default function Settings() {
   const [vol, setVol] = useState(Math.round(getVolume() * 100));
   const [muted, setMutedState] = useState(isMuted());
   const [enabled, setEnabledState] = useState(isFeedbackEnabled());
+  const [bindingReport, setBindingReport] = useState<ReconciliationReport | null>(null);
+  const [syncing, setSyncing] = useState(false);
+
+  async function runReconcile() {
+    setSyncing(true);
+    try {
+      const result = await reconcileExternalRefs();
+      setBindingReport(result.report);
+      if (result.ok) toast.success(result.message);
+      else toast.error(result.message);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Reconcile failed");
+    } finally {
+      setSyncing(false);
+    }
+  }
   return (
     <div>
       <PageHeader eyebrow="Admin" title="Settings & Permissions" description="Scan feedback and system info. Role-based access control is not managed here." />
@@ -37,6 +54,29 @@ export default function Settings() {
               </p>
             </div>
           </div>
+        </div>
+
+        <div className="ols-card p-5 lg:col-span-2">
+          <div className="mb-3 flex items-center gap-2">
+            <Link2 size={16} />
+            <h3 className="text-sm font-semibold">Central order binding</h3>
+          </div>
+          <p className="mb-4 text-xs text-muted-foreground">
+            Reconcile <code className="font-mono">ols_orders_cache.external_ref</code> bindings so Central scan handoff
+            can resolve canonical <code className="font-mono">order_id</code>. Live mode invokes Core RPC when deployed;
+            demo mode applies software-validation bindings only.
+          </p>
+          <Button onClick={runReconcile} disabled={syncing} className="mb-4">
+            {syncing ? "Reconciling…" : "Run external_ref reconcile"}
+          </Button>
+          {bindingReport && (
+            <ul className="space-y-1 text-xs">
+              <li className="flex justify-between"><span>Total orders</span><span>{bindingReport.total}</span></li>
+              <li className="flex justify-between text-success"><span>Bound</span><span>{bindingReport.bound}</span></li>
+              <li className="flex justify-between text-warning"><span>Unbound</span><span>{bindingReport.unbound}</span></li>
+              <li className="flex justify-between text-destructive"><span>Invalid</span><span>{bindingReport.invalid}</span></li>
+            </ul>
+          )}
         </div>
 
         <div className="ols-card p-5">
