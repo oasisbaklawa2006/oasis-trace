@@ -1,11 +1,13 @@
 import { lazy, Suspense } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import AppShell from "@/components/AppShell";
 import AuthGate from "@/components/AuthGate";
+import DeviceRouteGuard from "@/components/DeviceRouteGuard";
+import { DeviceSurfaceProvider } from "@/context/DeviceSurfaceContext";
 import Dashboard from "./pages/Dashboard";
 import ProductionEntry from "./pages/ProductionEntry";
 import StockUnits from "./pages/StockUnits";
@@ -20,6 +22,7 @@ import Printers from "./pages/Printers";
 import Templates from "./pages/Templates";
 import PrintLogs from "./pages/PrintLogs";
 import Reprints from "./pages/Reprints";
+import SurfaceBlocked from "./pages/SurfaceBlocked";
 // Reports is heavy (jspdf + autotable + multi-table scans) — lazy load so it
 // never preloads on first render.
 const Reports = lazy(() => import("./pages/Reports"));
@@ -36,6 +39,40 @@ const ReportsLazy = () => (
   </Suspense>
 );
 
+function AppRoutes() {
+  const location = useLocation();
+  return (
+    <DeviceSurfaceProvider pathname={location.pathname}>
+      <Routes>
+        <Route element={<AppShell />}>
+          <Route path="/surface-blocked" element={<SurfaceBlocked />} />
+          <Route path="/tv/gate" element={<TvGate />} />
+          <Route path="/tv/dispatch" element={<TvDispatch />} />
+          <Route element={<DeviceRouteGuard />}>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/production" element={<ProductionEntry />} />
+            <Route path="/stock" element={<StockUnits />} />
+            <Route path="/cartons" element={<Cartonization />} />
+            <Route path="/dpl" element={<DPL />} />
+            <Route path="/finance" element={<FinancePI />} />
+            <Route path="/dispatch" element={<DispatchBundle />} />
+            <Route path="/shipping" element={<ShippingLabel />} />
+            <Route path="/gate" element={<GateScan />} />
+            <Route path="/trace" element={<Traceability />} />
+            <Route path="/printers" element={<Printers />} />
+            <Route path="/templates" element={<Templates />} />
+            <Route path="/print-logs" element={<PrintLogs />} />
+            <Route path="/reprints" element={<Reprints />} />
+            <Route path="/reports" element={<ReportsLazy />} />
+            <Route path="/settings" element={<Settings />} />
+          </Route>
+        </Route>
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+    </DeviceSurfaceProvider>
+  );
+}
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -43,29 +80,7 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <AuthGate>
-          <Routes>
-            <Route element={<AppShell />}>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/production" element={<ProductionEntry />} />
-              <Route path="/stock" element={<StockUnits />} />
-              <Route path="/cartons" element={<Cartonization />} />
-              <Route path="/dpl" element={<DPL />} />
-              <Route path="/finance" element={<FinancePI />} />
-              <Route path="/dispatch" element={<DispatchBundle />} />
-              <Route path="/shipping" element={<ShippingLabel />} />
-              <Route path="/gate" element={<GateScan />} />
-              <Route path="/trace" element={<Traceability />} />
-              <Route path="/printers" element={<Printers />} />
-              <Route path="/templates" element={<Templates />} />
-              <Route path="/print-logs" element={<PrintLogs />} />
-              <Route path="/reprints" element={<Reprints />} />
-              <Route path="/reports" element={<ReportsLazy />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route path="/tv/gate" element={<TvGate />} />
-              <Route path="/tv/dispatch" element={<TvDispatch />} />
-            </Route>
-            <Route path="*" element={<NotFound />} />
-          </Routes>
+          <AppRoutes />
         </AuthGate>
       </BrowserRouter>
     </TooltipProvider>
