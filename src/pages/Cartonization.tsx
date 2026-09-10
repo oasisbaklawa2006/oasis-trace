@@ -18,12 +18,13 @@ import { StatusPill } from "@/components/StatusPill";
 import { feedback } from "@/lib/scanFeedback";
 import { useOlsSession } from "@/hooks/useOlsSession";
 import { usePendingCentralSubmitSync } from "@/hooks/usePendingCentralSubmitSync";
+import { useDeviceSurface } from "@/context/DeviceSurfaceContext";
 import { submitWithOfflineRetry } from "@/lib/scanSubmitQueue";
 import type { CentralSubmitResult } from "@/lib/centralSubmit";
 import type { CentralScanSyncStatus } from "@/lib/centralScanStatus";
 import type { Carton, CartonContent, OrderCache, ProductionLabel } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
-import { generateLabelCommand, NO_PHYSICAL_PRINT_NOTE } from "@/lib/labelPrintLog";
+import { executeGovernedPrint, NO_PHYSICAL_PRINT_NOTE } from "@/lib/governedPrint";
 import { buildCartonLabelPayload } from "@/lib/labelPayloads";
 import { insertWithUniqueRetry } from "@/lib/insertWithRetry";
 import { allocateNextCartonIndex } from "@/lib/cartonIndex";
@@ -54,6 +55,7 @@ export default function Cartonization() {
   const [submitting, setSubmitting] = useState(false);
   const [cartonError, setCartonError] = useState<string | null>(null);
   const { session, canSubmitCentral } = useOlsSession();
+  const { can, capabilityGuidance } = useDeviceSurface();
   const [recentCartons, setRecentCartons] = useState<Carton[]>([]);
   const [allCartons, setAllCartons] = useState<Carton[]>([]);
   const [allContents, setAllContents] = useState<CartonContent[]>([]);
@@ -206,6 +208,12 @@ export default function Cartonization() {
   async function finalizeCarton() {
     try {
       setCartonError(null);
+      if (!can("print_command")) {
+        const message = capabilityGuidance("print_command");
+        setCartonError(message);
+        toast.error(message);
+        return;
+      }
       if (!carton || contents.length === 0) { toast.error("Add at least one label"); return; }
       const sealCheck = validateSealCarton({
         carton,
@@ -219,22 +227,32 @@ export default function Cartonization() {
       }
       const net = sealCheck.data?.net ?? 0;
       const gross = sealCheck.data?.gross ?? 0;
-      // Generate the TSPL command (proves GENERATED); best-effort clipboard
-      // copy. This is NOT a physical print — see labelPrintLog.ts header.
-      const { copiedToClipboard } = await generateLabelCommand(buildCartonLabelPayload({
-        customerName: carton.customer_name, orderRef: carton.order_ref,
-        cartonIndex: carton.carton_index, itemCount: contents.length,
-        netWeightKg: net, barcode: barcodeDisplay?.labelBarcode || carton.carton_no,
-      }));
+      const labelBarcode = barcodeDisplay?.labelBarcode || carton.carton_no;
+      const printResult = await executeGovernedPrint({
+        surface: "carton",
+        refId: carton.id,
+        barcodeIdentity: labelBarcode,
+        payload: buildCartonLabelPayload({
+          customerName: carton.customer_name,
+          orderRef: carton.order_ref,
+          cartonIndex: carton.carton_index,
+          itemCount: contents.length,
+          netWeightKg: net,
+          barcode: labelBarcode,
+        }),
+        actorId: session?.user?.id,
+      });
+      if (printResult.ok === false) throw new Error(printResult.message);
+
       await sealCartonWithHandover({
         carton,
         net,
         gross,
-        copiedToClipboard,
+        copiedToClipboard: printResult.copiedToClipboard,
         labelCount: contents.length,
         actorId: session?.user?.id,
       });
-      toast.success("Carton packed — label command generated", { description: NO_PHYSICAL_PRINT_NOTE });
+      toast.success("Carton packed — governed label command generated", { description: NO_PHYSICAL_PRINT_NOTE });
       setCarton(null); setContents([]); setIdentityResult(null);
       const allC = await listTable<Carton>("ols_cartons", { order: "created_at" });
       setAllCartons(allC);
@@ -322,7 +340,14 @@ export default function Cartonization() {
             {!carton ? (
               <Button onClick={startCarton} className="bg-gradient-primary text-primary-foreground"><PackagePlus size={16} className="mr-1.5" /> Start Carton</Button>
             ) : (
-              <Button variant="outline" onClick={finalizeCarton}><Printer size={16} className="mr-1.5" /> Pack & Generate Carton Label</Button>
+              <Button
+                variant="outline"
+                onClick={finalizeCarton}
+                disabled={!can("print_command")}
+                title={!can("print_command") ? capabilityGuidance("print_command") : undefined}
+              >
+                <Printer size={16} className="mr-1.5" /> Pack & Generate Carton Label
+              </Button>
             )}
           </div>
 
