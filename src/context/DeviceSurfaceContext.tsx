@@ -6,9 +6,9 @@ import {
   detectDeviceSurface,
   isCapabilityAllowed,
   readPersistedSurfaceOverride,
-  routeAccessForSurface,
   type RouteAccessResult,
 } from "@/lib/deviceSurfaceContract";
+import { runtimeRouteAccessForSurface } from "@/lib/deviceSurfaceRuntimePolicy";
 
 export interface DeviceSurfaceContextValue {
   surface: DeviceSurface;
@@ -64,7 +64,10 @@ export function DeviceSurfaceProvider({
     [widthPx, paramOverride, coarsePointer],
   );
 
-  const access = useMemo(() => routeAccessForSurface(pathname, surface), [pathname, surface]);
+  const access = useMemo(
+    () => runtimeRouteAccessForSurface(pathname, surface),
+    [pathname, surface],
+  );
 
   const value = useMemo<DeviceSurfaceContextValue>(() => {
     const can = (capability: DeviceCapability) => isCapabilityAllowed(surface, capability).allowed;
