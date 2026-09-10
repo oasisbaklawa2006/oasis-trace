@@ -30,15 +30,20 @@ interface Props {
   refType: ReprintRefType;
   refId: string;
   refLabel: string;
-  /** Called only when reprint is approved (immediate or supervisor override). */
-  onConfirmed?: (info: { reason: string; approver?: string; watermark: string }) => void;
+  /** Called only when reprint is approved; must complete governed command/log generation. */
+  onConfirmed?: (info: {
+    reason: string;
+    approver?: string;
+    watermark: string;
+    reprintCount: number;
+  }) => void | Promise<void>;
 }
 
 /**
  * Reprint reason modal with approval policy:
- * - 1st reprint: instant approval, log only.
+ * - 1st reprint: instant approval, then governed command generation.
  * - 2nd+ reprint: queued as `pending` unless a supervisor/admin overrides.
- * Watermark "DUPLICATE COPY" is always passed through to the print payload.
+ * Watermark "DUPLICATE COPY" is always passed through to the governed print payload.
  */
 export function ReprintModal({ open, onOpenChange, refType, refId, refLabel, onConfirmed }: Props) {
   const [reason, setReason] = useState(REASONS[0]);
@@ -72,33 +77,35 @@ export function ReprintModal({ open, onOpenChange, refType, refId, refLabel, onC
         return;
       }
 
-      // Case 2: instant approval or supervisor override → log + proceed.
-      // Deliberately NOT swallowed: `ols_reprint_requests` is the governance
-      // record of this reprint's authorization. If it fails to write, the
-      // whole reprint must be treated as failed (outer catch below) rather
-      // than silently continuing to print_logs/audit and reporting success.
+      // Case 2: instant approval or supervisor override. Persist the governance
+      // authorization first. Command generation and print logging then run through
+      // the governed callback; this modal never fabricates a print-log success.
       const reqRow = await insertRow<ReprintRow>("ols_reprint_requests", {
         ref_type: refType, ref_id: refId,
         reason: packForRow(parsed, override && overrideAllowed),
         status: "approved",
       });
 
-      await insertRow("ols_print_logs", {
-        ref_type: refType, ref_id: refId,
-        success: true, is_reprint: true, reprint_count: priorCount + 1,
-        reason: finalReason,
-      });
-
-      // audit() never throws — a failed audit mirror queues for retry
-      // instead of silently vanishing or blocking an already-durable reprint.
       await audit({
         action: override ? "reprint_override" : "reprint_immediate",
         entity_type: refType, entity_id: refId,
         details: { request_id: reqRow.id, reason: finalReason, approver, override },
       });
 
-      toast.success(override ? "Supervisor override · reprint logged" : "Reprint logged", { description: refLabel });
-      onConfirmed?.({ reason: finalReason, approver, watermark: DUPLICATE_WATERMARK });
+      if (!onConfirmed) {
+        throw new Error("Governed reprint command handler is unavailable");
+      }
+
+      await onConfirmed({
+        reason: finalReason,
+        approver,
+        watermark: DUPLICATE_WATERMARK,
+        reprintCount: priorCount + 1,
+      });
+
+      toast.success(override ? "Supervisor override · reprint command generated" : "Reprint command generated", {
+        description: refLabel,
+      });
       onOpenChange(false);
     } catch (e: unknown) {
       toast.error("Reprint failed", { description: errorMessage(e) });
@@ -151,7 +158,7 @@ export function ReprintModal({ open, onOpenChange, refType, refId, refLabel, onC
             <div className="flex items-center justify-between rounded-xl border bg-surface px-3 py-2.5">
               <div>
                 <p className="text-xs font-semibold">Supervisor override</p>
-                <p className="text-[11px] text-muted-foreground">Approve and print immediately. Logged as override.</p>
+                <p className="text-[11px] text-muted-foreground">Approve and generate immediately. Logged as override.</p>
               </div>
               <Switch checked={override} onCheckedChange={setOverride} />
             </div>
