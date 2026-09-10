@@ -15,7 +15,7 @@ import { StatusPill } from "@/components/StatusPill";
 import { useNavigate } from "react-router-dom";
 import type { Department, ProductCache, ProductionLabel } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
-import { generateLabelCommandBatch, recordLabelGenerated, NO_PHYSICAL_PRINT_NOTE } from "@/lib/labelPrintLog";
+import { executeGovernedPrintBatch, NO_PHYSICAL_PRINT_NOTE } from "@/lib/governedPrint";
 import { buildProductionLabelPayload } from "@/lib/labelPayloads";
 import { computeBestBefore } from "@/lib/dateMath";
 export default function ProductionEntry() {
@@ -109,19 +109,26 @@ export default function ProductionEntry() {
         idempotencyKey,
       );
       const batchNo = batch.batch_no;
-      // Generate every tray's TSPL command (proves GENERATED) and best-effort
-      // copy the WHOLE batch to the clipboard as one block — copying per-tray
-      // would overwrite the clipboard each time, leaving only the last
-      // command retrievable. This is NOT a physical print — see
-      // labelPrintLog.ts header.
-      const { copiedToClipboard } = await generateLabelCommandBatch(created.map(label => buildProductionLabelPayload({
-        productName: product?.name, sku: product?.sku, batchNo,
-        mfgDate: form.mfg_date, shelfLifeDays: form.shelf_life_days,
-        netWeight: form.net_weight, grossWeight: form.gross_weight, labelNo: label.label_no,
+
+      const governedBatch = await executeGovernedPrintBatch(created.map(label => ({
+        surface: "production_label" as const,
+        refId: label.id,
+        barcodeIdentity: label.label_no,
+        payload: buildProductionLabelPayload({
+          productName: product?.name,
+          sku: product?.sku,
+          batchNo,
+          mfgDate: form.mfg_date,
+          shelfLifeDays: form.shelf_life_days,
+          netWeight: form.net_weight,
+          grossWeight: form.gross_weight,
+          labelNo: label.label_no,
+        }),
+        actorName: form.operator_name || undefined,
       })));
-      for (const label of created) {
-        await recordLabelGenerated({ refType: "production_label", refId: label.id, copiedToClipboard });
-      }
+      const failed = governedBatch.results.find(result => result.ok === false);
+      if (failed && failed.ok === false) throw new Error(failed.message);
+
       setLastBatch(created);
       setRecent(await listTable<ProductionLabel>("ols_production_labels", { order: "created_at", limit: 8 }));
       toast.success(`Generated ${created.length} label command${created.length > 1 ? "s" : ""}`, {
