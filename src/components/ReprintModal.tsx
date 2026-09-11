@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { insertRow } from "@/lib/data";
+import { insertRow, updateRow } from "@/lib/data";
 import { audit } from "@/lib/audit";
 import { toast } from "sonner";
 import { AlertTriangle, ShieldCheck } from "lucide-react";
@@ -36,6 +36,8 @@ interface Props {
     approver?: string;
     watermark: string;
     reprintCount: number;
+    actorId?: string;
+    actorName?: string;
   }) => void | Promise<void>;
 }
 
@@ -59,7 +61,7 @@ export function ReprintModal({ open, onOpenChange, refType, refId, refLabel, onC
     getReprintCount(refType, refId).then(setPriorCount).catch(() => setPriorCount(0));
   }, [open, refType, refId]);
 
-  const { canApproveReprint } = useOlsSession();
+  const { canApproveReprint, session } = useOlsSession();
   const needsApproval = requiresApproval(priorCount);
   const overrideAllowed = supabaseConfigured ? canApproveReprint : canOverride();
 
@@ -77,30 +79,38 @@ export function ReprintModal({ open, onOpenChange, refType, refId, refLabel, onC
         return;
       }
 
-      // Case 2: instant approval or supervisor override. Persist the governance
-      // authorization first. Command generation and print logging then run through
-      // the governed callback; this modal never fabricates a print-log success.
-      const reqRow = await insertRow<ReprintRow>("ols_reprint_requests", {
-        ref_type: refType, ref_id: refId,
-        reason: packForRow(parsed, override && overrideAllowed),
-        status: "approved",
-      });
-
-      await audit({
-        action: override ? "reprint_override" : "reprint_immediate",
-        entity_type: refType, entity_id: refId,
-        details: { request_id: reqRow.id, reason: finalReason, approver, override },
-      });
-
       if (!onConfirmed) {
         throw new Error("Governed reprint command handler is unavailable");
       }
+
+      const actorId = session?.user?.id;
+      const actorName = session?.user?.email ?? actorId;
+      if (supabaseConfigured && !actorId) {
+        throw new Error("Authenticated reprint actor is required in live mode");
+      }
+
+      // Case 2: instant approval or supervisor override. The request stays retryable
+      // until governed command generation succeeds; only then may it become approved.
+      const reqRow = await insertRow<ReprintRow>("ols_reprint_requests", {
+        ref_type: refType, ref_id: refId,
+        reason: packForRow(parsed, override && overrideAllowed),
+        status: "pending",
+      });
 
       await onConfirmed({
         reason: finalReason,
         approver,
         watermark: DUPLICATE_WATERMARK,
         reprintCount: priorCount + 1,
+        actorId,
+        actorName,
+      });
+
+      await updateRow("ols_reprint_requests", reqRow.id, { status: "approved" });
+      await audit({
+        action: override ? "reprint_override" : "reprint_immediate",
+        entity_type: refType, entity_id: refId,
+        details: { request_id: reqRow.id, reason: finalReason, approver, override, actor_id: actorId },
       });
 
       toast.success(override ? "Supervisor override · reprint command generated" : "Reprint command generated", {
