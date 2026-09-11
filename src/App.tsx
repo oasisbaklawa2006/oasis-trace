@@ -46,9 +46,9 @@ function AppRoutes() {
       <Routes>
         <Route element={<AppShell />}>
           <Route path="/surface-blocked" element={<SurfaceBlocked />} />
-          <Route path="/tv/gate" element={<TvGate />} />
-          <Route path="/tv/dispatch" element={<TvDispatch />} />
           <Route element={<DeviceRouteGuard />}>
+            <Route path="/tv/gate" element={<TvGate />} />
+            <Route path="/tv/dispatch" element={<TvDispatch />} />
             <Route path="/" element={<Dashboard />} />
             <Route path="/production" element={<ProductionEntry />} />
             <Route path="/stock" element={<StockUnits />} />
