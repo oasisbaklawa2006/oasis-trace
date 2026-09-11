@@ -165,7 +165,7 @@ export default function ShippingLabel() {
           refType="shipping"
           refId={reprint.id}
           refLabel={reprint.shipping_no}
-          onConfirmed={async ({ reason, watermark, reprintCount }) => {
+          onConfirmed={async ({ reason, watermark, reprintCount, actorId, actorName }) => {
             const result = await executeGovernedReprint({
               surface: "shipping",
               refId: reprint.id,
@@ -180,6 +180,8 @@ export default function ShippingLabel() {
               reprintReason: reason,
               reprintCount,
               watermark,
+              actorId,
+              actorName,
             });
             if (result.ok === false) throw new Error(result.message);
             await reload();
