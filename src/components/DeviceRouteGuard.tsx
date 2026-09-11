@@ -7,7 +7,7 @@ export default function DeviceRouteGuard() {
 
   if (!access.allowed) {
     const from = `${location.pathname}${location.search}`;
-    return <Navigate to="/surface-blocked" replace state={{ from }} />;
+    return <Navigate to={`/surface-blocked${location.search}`} replace state={{ from }} />;
   }
 
   return <Outlet />;
