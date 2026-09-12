@@ -21,6 +21,7 @@ import { copyToClipboardBestEffort } from "@/lib/labelPrintLog";
 import { resolveCartonBarcodeDisplay } from "@/lib/barcodeCarton";
 import type {
   Carton,
+  CartonContent,
   LabelTemplateRow,
   PrinterRow,
   ProductionLabel,
@@ -194,26 +195,19 @@ export type PrintIdentityValidation =
   | GovernedPrintFailure
   | { ok: true; normalized: string; kind: BarcodeIdentityKind };
 
-export function validatePrintIdentity(
-  surface: PrintSurface,
-  rawIdentity: string,
-): PrintIdentityValidation {
+export function validatePrintIdentity(surface: PrintSurface, rawIdentity: string): PrintIdentityValidation {
   const allowed = IDENTITY_KINDS[surface];
   if (!allowed) {
     const v = validateBarcodeIdentity(rawIdentity);
     if (v.ok === false) return { ok: false, code: mapIdentityCode(v.code), message: v.message };
     return { ok: true, normalized: v.normalized, kind: v.kind };
   }
-
   for (const kind of allowed) {
     const v = validateBarcodeIdentity(rawIdentity, { expectedKind: kind });
     if (v.ok) return { ok: true, normalized: v.normalized, kind: v.kind };
   }
-
   const probe = validateBarcodeIdentity(rawIdentity);
-  if (probe.ok === false) {
-    return { ok: false, code: mapIdentityCode(probe.code), message: probe.message };
-  }
+  if (probe.ok === false) return { ok: false, code: mapIdentityCode(probe.code), message: probe.message };
   return {
     ok: false,
     code: "identity_mismatch",
@@ -247,11 +241,7 @@ export async function resolveTemplateForSurface(
   }
   const builtin = BUILTIN_TEMPLATES[surface];
   if (builtin) return builtin;
-  return {
-    ok: false,
-    code: "template_unavailable",
-    message: `No authoritative template for ${surface} label surface`,
-  };
+  return { ok: false, code: "template_unavailable", message: `No authoritative template for ${surface} label surface` };
 }
 
 export function verifyPrintEquivalence(
@@ -262,18 +252,22 @@ export function verifyPrintEquivalence(
 ): PrintVerificationResult {
   const normalized = identity.trim().toUpperCase();
   const barcodeMatches = (payload.barcode ?? "").trim().toUpperCase() === normalized;
-  const templateBound =
-    payload.widthMm === template.widthMm && payload.heightMm === template.heightMm;
+  const templateBound = payload.widthMm === template.widthMm && payload.heightMm === template.heightMm;
 
   let qrMatchesShipping: boolean | undefined;
-  if (opts?.qrIdentity && payload.qr) {
-    try {
-      const expected = deriveShippingQrRef(normalized);
-      qrMatchesShipping =
-        payload.qr.trim().toUpperCase() === opts.qrIdentity.trim().toUpperCase() &&
-        opts.qrIdentity.trim().toUpperCase() === expected;
-    } catch {
+  const expectedQrIdentity = opts?.qrIdentity?.trim();
+  if (expectedQrIdentity) {
+    if (!payload.qr?.trim()) {
       qrMatchesShipping = false;
+    } else {
+      try {
+        const expected = deriveShippingQrRef(normalized);
+        qrMatchesShipping =
+          payload.qr.trim().toUpperCase() === expectedQrIdentity.toUpperCase() &&
+          expectedQrIdentity.toUpperCase() === expected;
+      } catch {
+        qrMatchesShipping = false;
+      }
     }
   }
 
@@ -281,7 +275,7 @@ export function verifyPrintEquivalence(
   const parts: string[] = [];
   if (!barcodeMatches) parts.push("barcode≠identity");
   if (!templateBound) parts.push("template≠dimensions");
-  if (qrMatchesShipping === false) parts.push("qr≠derived");
+  if (qrMatchesShipping === false) parts.push(payload.qr?.trim() ? "qr≠derived" : "qr=missing");
 
   return {
     ok,
@@ -310,7 +304,13 @@ async function resolveCommandLang(
   if (!printerId) return "TSPL";
   const printers = await listTable<PrinterRow>("ols_printers");
   const printer = printers.find(p => p.id === printerId);
-  if (!printer) return "TSPL";
+  if (!printer) {
+    return {
+      ok: false,
+      code: "unsupported_transport",
+      message: "Selected printer is not registered; governed command generation was blocked",
+    };
+  }
   if (printer.command_lang === "BROWSER") {
     return {
       ok: false,
@@ -325,20 +325,13 @@ async function resolveCommandLang(
 /** Fail-closed governed print — generates command, persists job+log, never claims physical print. */
 export async function executeGovernedPrint(req: GovernedPrintRequest): Promise<GovernedPrintResult> {
   if (req.isReprint && !req.reprintReason?.trim()) {
-    return {
-      ok: false,
-      code: "reprint_reason_required",
-      message: "Reprint requires a documented reason — cannot silently re-allocate identity",
-    };
+    return { ok: false, code: "reprint_reason_required", message: "Reprint requires a documented reason — cannot silently re-allocate identity" };
   }
-
   const idCheck = validatePrintIdentity(req.surface, req.barcodeIdentity);
   if (idCheck.ok === false) return idCheck;
-
   const templateResult = await resolveTemplateForSurface(req.surface);
   if ("ok" in templateResult && templateResult.ok === false) return templateResult;
   const template = templateResult as ResolvedTemplate;
-
   const langResult = await resolveCommandLang(req.printerId, req.commandLang);
   if (typeof langResult !== "string") return langResult;
 
@@ -349,21 +342,11 @@ export async function executeGovernedPrint(req: GovernedPrintRequest): Promise<G
     barcode: idCheck.normalized,
     watermark: req.watermark ?? req.payload.watermark,
   };
-
-  const verification = verifyPrintEquivalence(payload, idCheck.normalized, template, {
-    qrIdentity: req.qrIdentity,
-  });
-  if (!verification.ok) {
-    return {
-      ok: false,
-      code: "payload_verification_failed",
-      message: verification.message,
-    };
-  }
+  const verification = verifyPrintEquivalence(payload, idCheck.normalized, template, { qrIdentity: req.qrIdentity });
+  if (!verification.ok) return { ok: false, code: "payload_verification_failed", message: verification.message };
 
   const command = langResult === "ZPL" ? generateZPL(payload) : generateTSPL(payload);
   const copiedToClipboard = await copyToClipboardBestEffort(command);
-
   const jobRow = await insertRow<{ id: string }>("ols_print_jobs", {
     template_id: template.id ?? null,
     printer_id: req.printerId ?? null,
@@ -371,7 +354,6 @@ export async function executeGovernedPrint(req: GovernedPrintRequest): Promise<G
     command_payload: command,
     status: "generated",
   });
-
   const logRow = await insertRow<{ id: string }>("ols_print_logs", {
     ref_type: req.surface,
     ref_id: req.refId,
@@ -388,7 +370,6 @@ export async function executeGovernedPrint(req: GovernedPrintRequest): Promise<G
       reprint: req.isReprint ? req.reprintReason : undefined,
     }),
   });
-
   return {
     ok: true,
     jobId: jobRow.id,
@@ -418,15 +399,9 @@ export async function executeGovernedPrintBatch(
 
   for (const item of items) {
     const idCheck = validatePrintIdentity(item.surface, item.barcodeIdentity);
-    if (idCheck.ok === false) {
-      results.push(idCheck);
-      continue;
-    }
+    if (idCheck.ok === false) { results.push(idCheck); continue; }
     const templateResult = await resolveTemplateForSurface(item.surface);
-    if ("ok" in templateResult && templateResult.ok === false) {
-      results.push(templateResult);
-      continue;
-    }
+    if ("ok" in templateResult && templateResult.ok === false) { results.push(templateResult); continue; }
     const template = templateResult as ResolvedTemplate;
     const payload: LabelPayload = {
       ...item.payload,
@@ -441,7 +416,6 @@ export async function executeGovernedPrintBatch(
     }
     const command = generateTSPL(payload);
     commands.push(command);
-
     const jobRow = await insertRow<{ id: string }>("ols_print_jobs", {
       template_id: template.id ?? null,
       command_lang: "TSPL",
@@ -460,6 +434,7 @@ export async function executeGovernedPrintBatch(
         tpl: template.version,
         job: "GENERATED",
         batch_job: jobRow.id,
+        actor: item.actorName ?? item.actorId,
       }),
     });
     results.push({
@@ -475,11 +450,16 @@ export async function executeGovernedPrintBatch(
     });
   }
 
-  const copiedToClipboard = commands.length > 0
-    ? await copyToClipboardBestEffort(commands.join("\n\n"))
-    : false;
-
+  const copiedToClipboard = commands.length > 0 ? await copyToClipboardBestEffort(commands.join("\n\n")) : false;
   return { results, copiedToClipboard };
+}
+
+function deriveShelfLifeDays(mfgDate?: string | null, bestBefore?: string | null): string {
+  if (!mfgDate || !bestBefore) return "—";
+  const start = Date.parse(`${mfgDate}T00:00:00Z`);
+  const end = Date.parse(`${bestBefore}T00:00:00Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return "—";
+  return String(Math.round((end - start) / 86_400_000));
 }
 
 /** Rebuild payload from persisted entity for reprint from PrintLogs / approval flow. */
@@ -501,7 +481,7 @@ export async function rebuildGovernedPrintRequest(
           sku: label.metadata?.sku,
           batchNo: label.metadata?.batch_no || label.batch_no || "—",
           mfgDate: label.mfg_date || "—",
-          shelfLifeDays: "—",
+          shelfLifeDays: deriveShelfLifeDays(label.mfg_date, label.best_before),
           netWeight: label.net_weight ?? "—",
           grossWeight: label.gross_weight ?? label.net_weight ?? "—",
           labelNo: label.label_no,
@@ -509,10 +489,14 @@ export async function rebuildGovernedPrintRequest(
       };
     }
     case "carton": {
-      const cartons = await listTable<Carton>("ols_cartons");
+      const [cartons, allContents] = await Promise.all([
+        listTable<Carton>("ols_cartons"),
+        listTable<CartonContent>("ols_carton_contents"),
+      ]);
       const carton = cartons.find(c => c.id === refId);
       if (!carton) return { ok: false, code: "entity_not_found", message: "Carton not found" };
       const display = resolveCartonBarcodeDisplay(carton.order_ref || "", carton.carton_no, carton.metadata);
+      const itemCount = allContents.filter(content => content.carton_id === carton.id).length;
       return {
         surface: "carton",
         refId,
@@ -521,7 +505,7 @@ export async function rebuildGovernedPrintRequest(
           customerName: carton.customer_name,
           orderRef: carton.order_ref,
           cartonIndex: carton.carton_index,
-          itemCount: 0,
+          itemCount,
           netWeightKg: carton.net_weight ?? 0,
           barcode: display.labelBarcode,
         }),
@@ -545,10 +529,6 @@ export async function rebuildGovernedPrintRequest(
       };
     }
     default:
-      return {
-        ok: false,
-        code: "template_unavailable",
-        message: `Governed reprint not supported for ref_type ${refType}`,
-      };
+      return { ok: false, code: "template_unavailable", message: `Governed reprint not supported for ref_type ${refType}` };
   }
 }
