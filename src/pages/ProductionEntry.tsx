@@ -18,6 +18,10 @@ import { errorMessage } from "@/lib/utils";
 import { executeGovernedPrintBatch, NO_PHYSICAL_PRINT_NOTE } from "@/lib/governedPrint";
 import { buildProductionLabelPayload } from "@/lib/labelPayloads";
 import { computeBestBefore } from "@/lib/dateMath";
+
+type PendingPrintRequest = Parameters<typeof executeGovernedPrintBatch>[0][number];
+type SubmitIssue = { kind: "save" | "command"; message: string };
+
 export default function ProductionEntry() {
   const nav = useNavigate();
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -32,7 +36,8 @@ export default function ProductionEntry() {
   });
   const [lastBatch, setLastBatch] = useState<ProductionLabel[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitIssue, setSubmitIssue] = useState<SubmitIssue | null>(null);
+  const [pendingCommandRetries, setPendingCommandRetries] = useState<PendingPrintRequest[]>([]);
 
   useEffect(() => {
     (async () => {
@@ -46,7 +51,50 @@ export default function ProductionEntry() {
 
   const update = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
+  async function retryFailedCommands() {
+    if (pendingCommandRetries.length === 0) return;
+    setIsSubmitting(true);
+    setSubmitIssue(null);
+    try {
+      const governedBatch = await executeGovernedPrintBatch(pendingCommandRetries);
+      const failures = governedBatch.results
+        .map((result, index) => ({ result, request: pendingCommandRetries[index] }))
+        .filter(entry => entry.result.ok === false);
+
+      if (failures.length > 0) {
+        const remaining = failures.map(f => f.request).filter(Boolean);
+        const identities = remaining.map(r => r.barcodeIdentity).join(", ");
+        const firstMessage = failures[0].result.ok === false ? failures[0].result.message : "Unknown command failure";
+        const message = `${failures.length} retry command${failures.length > 1 ? "s" : ""} still failed: ${identities}. ${firstMessage}`;
+        setPendingCommandRetries(remaining);
+        setSubmitIssue({ kind: "command", message });
+        toast.error(`${failures.length} command retr${failures.length > 1 ? "ies" : "y"} failed`, {
+          description: message,
+          duration: Infinity,
+        });
+        return;
+      }
+
+      setPendingCommandRetries([]);
+      setSubmitIssue(null);
+      setForm(f => ({ ...f, batch_no: num.batch() }));
+      toast.success("Failed label commands retried successfully", {
+        description: NO_PHYSICAL_PRINT_NOTE,
+      });
+    } catch (err: unknown) {
+      const message = errorMessage(err, "Failed to retry persisted label commands");
+      setSubmitIssue({ kind: "command", message });
+      toast.error(message, { duration: Infinity });
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   async function generate() {
+    if (pendingCommandRetries.length > 0) {
+      toast.error("Retry the failed commands from the saved batch before creating another batch.");
+      return;
+    }
     if (!form.department_id || !form.product_id || !form.net_weight) {
       toast.error("Department, product and net weight are required");
       return;
@@ -72,7 +120,7 @@ export default function ProductionEntry() {
       return;
     }
     setIsSubmitting(true);
-    setSubmitError(null);
+    setSubmitIssue(null);
     try {
       const batchInput = {
         product_id: form.product_id,
@@ -110,7 +158,7 @@ export default function ProductionEntry() {
       );
       const batchNo = batch.batch_no;
 
-      const governedBatch = await executeGovernedPrintBatch(created.map(label => ({
+      const governedRequests: PendingPrintRequest[] = created.map(label => ({
         surface: "production_label" as const,
         refId: label.id,
         barcodeIdentity: label.label_no,
@@ -125,10 +173,15 @@ export default function ProductionEntry() {
           labelNo: label.label_no,
         }),
         actorName: form.operator_name || undefined,
-      })));
+      }));
 
+      const governedBatch = await executeGovernedPrintBatch(governedRequests);
       const failures = governedBatch.results
-        .map((result, index) => ({ result, identity: created[index]?.label_no ?? `item-${index + 1}` }))
+        .map((result, index) => ({
+          result,
+          identity: created[index]?.label_no ?? `item-${index + 1}`,
+          request: governedRequests[index],
+        }))
         .filter(entry => entry.result.ok === false);
 
       setLastBatch(created);
@@ -138,7 +191,8 @@ export default function ProductionEntry() {
         const identities = failures.map(f => f.identity).join(", ");
         const firstMessage = failures[0].result.ok === false ? failures[0].result.message : "Unknown command failure";
         const message = `Labels saved, but ${failures.length} of ${created.length} label commands failed: ${identities}. ${firstMessage}`;
-        setSubmitError(message);
+        setPendingCommandRetries(failures.map(f => f.request).filter(Boolean));
+        setSubmitIssue({ kind: "command", message });
         toast.error(`${failures.length} label command${failures.length > 1 ? "s" : ""} failed`, {
           description: message,
           duration: Infinity,
@@ -146,13 +200,14 @@ export default function ProductionEntry() {
         return;
       }
 
+      setPendingCommandRetries([]);
       toast.success(`Generated ${created.length} label command${created.length > 1 ? "s" : ""}`, {
         description: `${NO_PHYSICAL_PRINT_NOTE} Stock inward created automatically.`,
       });
       setForm(f => ({ ...f, batch_no: num.batch() }));
     } catch (err: unknown) {
       const msg = errorMessage(err, "Failed to save production labels");
-      setSubmitError(msg);
+      setSubmitIssue({ kind: "save", message: msg });
       toast.error(msg, { duration: Infinity });
     } finally {
       setIsSubmitting(false);
@@ -209,11 +264,20 @@ export default function ProductionEntry() {
             <Field label="Remarks" className="md:col-span-2"><Textarea rows={2} value={form.remarks} onChange={e => update("remarks", e.target.value)} /></Field>
           </div>
           <div className="mt-5 flex flex-wrap gap-2">
-            <Button onClick={generate} disabled={isSubmitting} className="bg-gradient-primary text-primary-foreground shadow-elevated"><Save size={16} className="mr-1.5" /> Generate Label Commands</Button>
+            <Button
+              onClick={pendingCommandRetries.length > 0 ? retryFailedCommands : generate}
+              disabled={isSubmitting}
+              className="bg-gradient-primary text-primary-foreground shadow-elevated"
+            >
+              <Save size={16} className="mr-1.5" />
+              {pendingCommandRetries.length > 0
+                ? `Retry ${pendingCommandRetries.length} Failed Command${pendingCommandRetries.length > 1 ? "s" : ""}`
+                : "Generate Label Commands"}
+            </Button>
           </div>
-          {submitError && (
+          {submitIssue && (
             <div className="mt-3 rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
-              <strong>Save failed:</strong> {submitError}
+              <strong>{submitIssue.kind === "save" ? "Save failed:" : "Label command failure:"}</strong> {submitIssue.message}
             </div>
           )}
         </div>
