@@ -243,7 +243,7 @@ const MOBILE_CAPABILITIES = new Set<DeviceCapability>([
   "navigate", "keyboard_wedge_scan", "central_submit", "offline_queue_view",
 ]);
 const HANDHELD_CAPABILITIES = new Set<DeviceCapability>([
-  "navigate", "keyboard_wedge_scan", "central_submit", "offline_queue_view", "finance_write",
+  "navigate", "keyboard_wedge_scan", "central_submit", "offline_queue_view",
 ]);
 const TV_CAPABILITIES = new Set<DeviceCapability>(["navigate", "offline_queue_view"]);
 
@@ -261,6 +261,7 @@ const HANDHELD_GUIDANCE = new Map<DeviceCapability, string>([
   ["reprint", "Reprint controls are PC-only."],
   ["admin_settings", "Admin settings require a PC browser."],
   ["production_write", "Production entry is desktop-only."],
+  ["finance_write", "Full finance PI approval is desktop-only; handheld /finance is scan verification only."],
   ["reports_export", "Report export requires a PC browser."],
   ["camera_scan", "Camera scanning is not implemented — keyboard-wedge input is the approved path."],
 ]);

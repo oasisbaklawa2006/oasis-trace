@@ -127,6 +127,22 @@ describe("isCapabilityAllowed — capability matrix", () => {
     expect(isCapabilityAllowed("mobile", "keyboard_wedge_scan").allowed).toBe(true);
     expect(isCapabilityAllowed("mobile", "print_command").allowed).toBe(false);
   });
+
+  it("handheld /finance is scan-only: finance_write is denied while central_submit and scan capabilities remain", () => {
+    // PR #38 finding D: handheld previously granted finance_write even though
+    // handheld /finance is scan-only and central_submit already covers the
+    // required flow. Least-privilege regression guard.
+    expect(isCapabilityAllowed("handheld", "finance_write").allowed).toBe(false);
+    expect(isCapabilityAllowed("handheld", "central_submit").allowed).toBe(true);
+    expect(isCapabilityAllowed("handheld", "keyboard_wedge_scan").allowed).toBe(true);
+    expect(isCapabilityAllowed("handheld", "navigate").allowed).toBe(true);
+    expect(isCapabilityAllowed("handheld", "offline_queue_view").allowed).toBe(true);
+  });
+
+  it("handheld finance_write denial carries explicit scan-only guidance, not a generic fallback", () => {
+    const r = isCapabilityAllowed("handheld", "finance_write");
+    expect(r.guidance).toMatch(/scan/i);
+  });
 });
 
 describe("navRoutesForSurface — filtered navigation", () => {

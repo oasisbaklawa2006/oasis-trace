@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { insertRow, listTable, updateRow } from "@/lib/data";
+import { insertRow, updateRow } from "@/lib/data";
 import { audit } from "@/lib/audit";
 import { toast } from "sonner";
 import { AlertTriangle, ShieldCheck } from "lucide-react";
@@ -15,7 +15,7 @@ import {
   canOverride, createPendingRequest, getReprintCount, parseReason, requiresApproval,
   type ReprintRefType, type ReprintRow,
 } from "@/lib/reprintPolicy";
-import type { PrintLogRow } from "@/lib/types";
+import { findReusableApprovedRequestLive } from "@/lib/reprintApprovalLookup";
 import { allocateGovernedReprint } from "@/lib/governedReprintAllocation";
 import { errorMessage } from "@/lib/utils";
 
@@ -42,37 +42,6 @@ interface Props {
     actorId?: string;
     actorName?: string;
   }) => void | Promise<void>;
-}
-
-function logContainsRequest(log: PrintLogRow, requestId: string): boolean {
-  const reason = log.reason ?? log.metadata?.reason ?? "";
-  return reason.split("|").some(part => part === `request=${requestId}`);
-}
-
-async function findReusableApprovedRequest(
-  refType: ReprintRefType,
-  refId: string,
-): Promise<ReprintRow | null> {
-  const [requests, logs] = await Promise.all([
-    listTable<ReprintRow>("ols_reprint_requests", { order: "created_at" }),
-    listTable<PrintLogRow>("ols_print_logs", { order: "created_at" }),
-  ]);
-  const candidates = requests
-    .filter(row =>
-      row.ref_type === refType &&
-      row.ref_id === refId &&
-      row.status === "approved" &&
-      Boolean(row.approved_by),
-    )
-    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
-
-  return candidates.find(row => !logs.some(log =>
-    log.ref_type === refType &&
-    log.ref_id === refId &&
-    log.is_reprint &&
-    log.success &&
-    logContainsRequest(log, row.id),
-  )) ?? null;
 }
 
 /**
@@ -153,7 +122,7 @@ export function ReprintModal({ open, onOpenChange, refType, refId, refLabel, onC
 
     let reqRow = requestRow;
     if (!reqRow) {
-      reqRow = await findReusableApprovedRequest(refType, refId);
+      reqRow = await findReusableApprovedRequestLive(refType, refId);
       if (!reqRow) {
         reqRow = await insertRow<ReprintRow>("ols_reprint_requests", {
           ref_type: refType,

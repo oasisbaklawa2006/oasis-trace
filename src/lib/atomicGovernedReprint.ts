@@ -53,20 +53,39 @@ function validateIdentity(surface: GovernedPrintRequest["surface"], raw: string)
   return { ok: true, normalized: result.normalized };
 }
 
+/**
+ * Resolves and validates a supplied printerId FIRST, so an unknown printer
+ * is always rejected regardless of what commandLang the caller also
+ * supplied. Only after that validation may a caller-supplied commandLang be
+ * honored — and only when it agrees with the registered printer's language.
+ */
 async function resolveLanguage(req: GovernedPrintRequest, template: ResolvedTemplate): Promise<"TSPL" | "ZPL" | GovernedPrintFailure> {
-  if (req.commandLang === "TSPL" || req.commandLang === "ZPL") return req.commandLang;
+  let printerLang: "TSPL" | "ZPL" | undefined;
   if (req.printerId) {
     const printers = await listTable<PrinterRow>("ols_printers");
     const printer = printers.find(row => row.id === req.printerId);
     if (!printer) {
       return { ok: false, code: "unsupported_transport", message: "Selected printer is not registered" };
     }
-    if (printer.command_lang === "ZPL") return "ZPL";
     if (printer.command_lang === "BROWSER") {
       return { ok: false, code: "unsupported_transport", message: "Browser print is not valid for governed thermal reprints" };
     }
-    return "TSPL";
+    printerLang = printer.command_lang === "ZPL" ? "ZPL" : "TSPL";
   }
+
+  if (req.commandLang === "TSPL" || req.commandLang === "ZPL") {
+    if (printerLang && printerLang !== req.commandLang) {
+      return {
+        ok: false,
+        code: "unsupported_transport",
+        message: `Requested command language ${req.commandLang} does not match registered printer language ${printerLang}`,
+      };
+    }
+    return req.commandLang;
+  }
+
+  if (printerLang) return printerLang;
+
   if (template.commandLang === "ZPL") return "ZPL";
   if (template.commandLang === "BROWSER") {
     return { ok: false, code: "unsupported_transport", message: "Browser print is not valid for governed thermal reprints" };
@@ -101,6 +120,14 @@ export async function executeAtomicGovernedReprint(
 
   const identity = validateIdentity(req.surface, req.barcodeIdentity);
   if (identity.ok === false) return identity;
+
+  if (req.surface === "shipping" && !req.qrIdentity?.trim()) {
+    return {
+      ok: false,
+      code: "payload_verification_failed",
+      message: "Shipping reprint requires a non-empty QR identity before verification",
+    };
+  }
 
   const templateResult = await resolveTemplateForSurface(req.surface);
   if ("ok" in templateResult && templateResult.ok === false) return templateResult;
