@@ -10,7 +10,8 @@ import { StatusPill } from "@/components/StatusPill";
 import { ReprintModal } from "@/components/ReprintModal";
 import type { Carton, FinancePi, FinancePiCarton, ShippingLabelRow } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
-import { executeGovernedPrint, executeGovernedReprint, NO_PHYSICAL_PRINT_NOTE } from "@/lib/governedPrint";
+import { executeGovernedPrint, NO_PHYSICAL_PRINT_NOTE } from "@/lib/governedPrint";
+import { executeAtomicGovernedReprint } from "@/lib/atomicGovernedReprint";
 import { buildShippingLabelPayload } from "@/lib/labelPayloads";
 import { traceMutations } from "@/lib/traceMutations";
 
@@ -160,7 +161,7 @@ export default function ShippingLabel() {
           refId={reprint.id}
           refLabel={reprint.shipping_no}
           onConfirmed={async ({ reason, watermark, reprintCount, requestId, actorId, actorName }) => {
-            const result = await executeGovernedReprint({
+            const result = await executeAtomicGovernedReprint({
               surface: "shipping",
               refId: reprint.id,
               barcodeIdentity: reprint.shipping_no,
