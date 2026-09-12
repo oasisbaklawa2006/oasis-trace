@@ -26,11 +26,11 @@ describe("TRACE_ROUTE_SURFACE_CENSUS — Point 99 device embedding census", () =
     );
   });
 
-  it("marks TV gate and print logs as read-only, not blocked", () => {
+  it("blocks generic gate and print logs on TV in favour of dedicated kiosks", () => {
     const gate = censusRowForRoute("/gate");
     const logs = censusRowForRoute("/print-logs");
-    expect(gate?.deviceIntent.tv).toBe("read");
-    expect(logs?.deviceIntent.tv).toBe("read");
+    expect(gate?.deviceIntent.tv).toBe("blocked");
+    expect(logs?.deviceIntent.tv).toBe("blocked");
   });
 
   it("blocks print/admin routes on TV", () => {
@@ -96,11 +96,12 @@ describe("routeAccessForSurface — fail-closed route policy", () => {
     expect(r.readOnly).toBe(false);
   });
 
-  it("TV gate is read-only", () => {
+  it("blocks generic gate on TV with dedicated kiosk guidance", () => {
     const r = routeAccessForSurface("/gate", "tv");
-    expect(r.allowed).toBe(true);
+    expect(r.allowed).toBe(false);
     expect(r.readOnly).toBe(true);
-    expect(r.mode).toBe("read");
+    expect(r.mode).toBe("blocked");
+    expect(r.guidance).toMatch(/\/tv\/gate/i);
   });
 
   it("TV production is blocked", () => {
@@ -129,10 +130,12 @@ describe("isCapabilityAllowed — capability matrix", () => {
 });
 
 describe("navRoutesForSurface — filtered navigation", () => {
-  it("TV nav excludes print/admin routes", () => {
+  it("TV nav excludes generic mutation-capable routes and print/admin routes", () => {
     const routes = navRoutesForSurface("tv").map(r => r.route);
     expect(routes).toContain("/");
-    expect(routes).toContain("/gate");
+    expect(routes).toContain("/trace");
+    expect(routes).not.toContain("/gate");
+    expect(routes).not.toContain("/print-logs");
     expect(routes).not.toContain("/printers");
     expect(routes).not.toContain("/settings");
   });
