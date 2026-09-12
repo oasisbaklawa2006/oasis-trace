@@ -126,11 +126,26 @@ export default function ProductionEntry() {
         }),
         actorName: form.operator_name || undefined,
       })));
-      const failed = governedBatch.results.find(result => result.ok === false);
-      if (failed && failed.ok === false) throw new Error(failed.message);
+
+      const failures = governedBatch.results
+        .map((result, index) => ({ result, identity: created[index]?.label_no ?? `item-${index + 1}` }))
+        .filter(entry => entry.result.ok === false);
 
       setLastBatch(created);
       setRecent(await listTable<ProductionLabel>("ols_production_labels", { order: "created_at", limit: 8 }));
+
+      if (failures.length > 0) {
+        const identities = failures.map(f => f.identity).join(", ");
+        const firstMessage = failures[0].result.ok === false ? failures[0].result.message : "Unknown command failure";
+        const message = `Labels saved, but ${failures.length} of ${created.length} label commands failed: ${identities}. ${firstMessage}`;
+        setSubmitError(message);
+        toast.error(`${failures.length} label command${failures.length > 1 ? "s" : ""} failed`, {
+          description: message,
+          duration: Infinity,
+        });
+        return;
+      }
+
       toast.success(`Generated ${created.length} label command${created.length > 1 ? "s" : ""}`, {
         description: `${NO_PHYSICAL_PRINT_NOTE} Stock inward created automatically.`,
       });
