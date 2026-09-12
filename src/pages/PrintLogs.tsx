@@ -7,10 +7,8 @@ import { History, Printer } from "lucide-react";
 import { ReprintModal } from "@/components/ReprintModal";
 import type { PrintLogRow } from "@/lib/types";
 import type { ReprintRefType } from "@/lib/reprintPolicy";
-import {
-  executeGovernedReprint,
-  rebuildGovernedPrintRequest,
-} from "@/lib/governedPrint";
+import { rebuildGovernedPrintRequest } from "@/lib/governedPrint";
+import { executeAtomicGovernedReprint } from "@/lib/atomicGovernedReprint";
 
 const SUPPORTED_REPRINT_SURFACES = new Set<ReprintRefType>([
   "production_label",
@@ -89,7 +87,7 @@ export default function PrintLogs() {
             );
             if ("code" in rebuilt) throw new Error(rebuilt.message);
 
-            const result = await executeGovernedReprint({
+            const result = await executeAtomicGovernedReprint({
               ...rebuilt,
               reprintReason: reason,
               reprintCount,
