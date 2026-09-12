@@ -26,6 +26,10 @@ export function reprintAllocationIdempotencyKey(requestId: string): string {
   return `trace-reprint:${requestId}`;
 }
 
+function canonicalCoreRefType(refType: ReprintRefType): string {
+  return refType === "shipping" ? "shipping_label" : refType;
+}
+
 export async function allocateGovernedReprint(
   input: AllocateGovernedReprintInput,
 ): Promise<GovernedReprintAllocation> {
@@ -40,15 +44,25 @@ export async function allocateGovernedReprint(
     },
   );
 
+  const expectedRefType = canonicalCoreRefType(input.refType);
   if (
     !result ||
     typeof result !== "object" ||
+    typeof result.allocation_id !== "string" ||
+    result.allocation_id.length === 0 ||
+    result.ref_type !== expectedRefType ||
+    result.ref_id !== input.refId ||
     !Number.isInteger(result.reprint_count) ||
     result.reprint_count < 1 ||
+    !Number.isInteger(result.approval_threshold) ||
+    result.approval_threshold < 1 ||
     typeof result.allowed !== "boolean" ||
-    typeof result.approval_required !== "boolean"
+    typeof result.approval_required !== "boolean" ||
+    typeof result.approval_granted !== "boolean" ||
+    typeof result.idempotency_replayed !== "boolean" ||
+    !(result.approval_request_id === null || typeof result.approval_request_id === "string")
   ) {
-    throw new Error("Core returned an invalid governed reprint allocation response");
+    throw new Error("Core returned an invalid or mismatched governed reprint allocation response");
   }
 
   return result;
