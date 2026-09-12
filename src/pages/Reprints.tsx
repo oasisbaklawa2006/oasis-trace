@@ -48,20 +48,28 @@ export default function Reprints() {
         description="Reprints from the 2nd attempt onward require supervisor approval. All decisions are audit-logged."
       />
 
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <p className="text-xs text-muted-foreground">Active role for approvals (local stub):</p>
-        <div className="flex items-center gap-2">
-          <Select value={role} onValueChange={(v) => { setRole(v as Role); setRoleState(v as Role); }}>
-            <SelectTrigger className="h-8 w-40 text-xs"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="operator">Operator</SelectItem>
-              <SelectItem value="supervisor">Supervisor</SelectItem>
-              <SelectItem value="admin">Admin</SelectItem>
-            </SelectContent>
-          </Select>
-          {userCanApprove && <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary"><ShieldCheck size={10} /> Can approve</span>}
+      {!supabaseConfigured && (
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <p className="text-xs text-muted-foreground">Active role for approvals (local stub):</p>
+          <div className="flex items-center gap-2">
+            <Select value={role} onValueChange={(v) => { setRole(v as Role); setRoleState(v as Role); }}>
+              <SelectTrigger className="h-8 w-40 text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="operator">Operator</SelectItem>
+                <SelectItem value="supervisor">Supervisor</SelectItem>
+                <SelectItem value="admin">Admin</SelectItem>
+              </SelectContent>
+            </Select>
+            {userCanApprove && <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary"><ShieldCheck size={10} /> Can approve</span>}
+          </div>
         </div>
-      </div>
+      )}
+
+      {supabaseConfigured && userCanApprove && (
+        <div className="mb-4 flex justify-end">
+          <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary"><ShieldCheck size={10} /> Authenticated approver</span>
+        </div>
+      )}
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as ReprintStatus | "all")}>
         <TabsList>
@@ -138,17 +146,25 @@ function DecisionDialog({ row, action, onClose, onDone }: {
   const [approver, setApprover] = useState("");
   const [remarks, setRemarks] = useState("");
   const [busy, setBusy] = useState(false);
+  const { session } = useOlsSession();
+
   async function go() {
     if (!approver.trim()) { toast.error("Approver name is required"); return; }
+    const approverId = session?.user?.id;
+    if (supabaseConfigured && action === "approve" && !approverId) {
+      toast.error("Authenticated approver identity is required");
+      return;
+    }
     setBusy(true);
     try {
-      if (action === "approve") await approveRequest(row, approver.trim(), remarks);
+      if (action === "approve") await approveRequest(row, approver.trim(), remarks, approverId);
       else await rejectRequest(row, approver.trim(), remarks);
       toast.success(`Request ${action === "approve" ? "approved" : "rejected"}`);
       onDone();
     } catch (e: unknown) { toast.error("Failed", { description: errorMessage(e) }); }
     finally { setBusy(false); }
   }
+
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent>

@@ -10,7 +10,8 @@ import { StatusPill } from "@/components/StatusPill";
 import { ReprintModal } from "@/components/ReprintModal";
 import type { Carton, FinancePi, FinancePiCarton, ShippingLabelRow } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
-import { generateLabelCommand, recordLabelGenerated, NO_PHYSICAL_PRINT_NOTE } from "@/lib/labelPrintLog";
+import { executeGovernedPrint, NO_PHYSICAL_PRINT_NOTE } from "@/lib/governedPrint";
+import { executeAtomicGovernedReprint } from "@/lib/atomicGovernedReprint";
 import { buildShippingLabelPayload } from "@/lib/labelPayloads";
 import { traceMutations } from "@/lib/traceMutations";
 
@@ -27,8 +28,6 @@ export default function ShippingLabel() {
   async function reload() {
     setCartons(await listTable<Carton>("ols_cartons"));
     setPis(await listTable<FinancePi>("ols_finance_pi"));
-    // Real FK source for carton -> PI membership — never inferred from
-    // order_ref, which multiple PIs/DPLs can share.
     setPiCartons(await listTable<FinancePiCarton>("ols_finance_pi_cartons"));
     setLabels(await listTable<ShippingLabelRow>("ols_shipping_labels", { order: "created_at" }));
   }
@@ -39,9 +38,6 @@ export default function ShippingLabel() {
     try {
       setLabelError(null);
       setIsSubmitting(true);
-      // Resolve the PI via authoritative carton membership (ols_finance_pi_cartons),
-      // never order_ref alone — an order can have multiple PIs/DPLs, and a
-      // guess here would risk generating a label against the wrong invoice.
       const memberPiIds = new Set(piCartons.filter(pc => pc.carton_id === carton.id).map(pc => pc.pi_id));
       const matchingClearedPis = pis.filter(p => memberPiIds.has(p.id) && p.status === "cleared");
       if (matchingClearedPis.length !== 1) {
@@ -52,9 +48,6 @@ export default function ShippingLabel() {
         );
       }
       const pi = matchingClearedPis[0];
-      // shipping_no and qr_ref are Trace-allocated (barcodeIdentity.ts)
-      // and unique — retry with fresh ids on a confirmed unique-constraint
-      // violation, bounded.
       const shippingNo = await productionNum.shipping();
       const lbl = await traceMutations.createShippingLabel({
         shipping_no: shippingNo,
@@ -65,19 +58,25 @@ export default function ShippingLabel() {
         address: "—",
         invoice_ref: pi.invoice_ref,
         qr_ref: productionNum.qrRef(shippingNo),
-        // "generated" (not "printed") — no print transport exists yet, see
-        // labelPrintLog.ts. This status is otherwise only compared against
-        // "dispatched" downstream (GateScan), so this rename is safe.
         status: "generated",
       }, `shipping-label:${carton.id}`);
-      // Generate the TSPL command (proves GENERATED); best-effort clipboard
-      // copy. This is NOT a physical print — see labelPrintLog.ts header.
-      const { copiedToClipboard } = await generateLabelCommand(buildShippingLabelPayload({
-        consignee: carton.customer_name, invoiceRef: pi?.invoice_ref, shippingNo: lbl.shipping_no, qrRef: lbl.qr_ref,
-      }));
-      await recordLabelGenerated({ refType: "shipping", refId: lbl.id, copiedToClipboard });
+
+      const printResult = await executeGovernedPrint({
+        surface: "shipping",
+        refId: lbl.id,
+        barcodeIdentity: lbl.shipping_no,
+        qrIdentity: lbl.qr_ref,
+        payload: buildShippingLabelPayload({
+          consignee: carton.customer_name,
+          invoiceRef: pi.invoice_ref,
+          shippingNo: lbl.shipping_no,
+          qrRef: lbl.qr_ref,
+        }),
+      });
+      if (printResult.ok === false) throw new Error(printResult.message);
+
       toast.success(`Shipping label ${lbl.shipping_no} — command generated`, { description: NO_PHYSICAL_PRINT_NOTE });
-      reload();
+      await reload();
     } catch (err: unknown) {
       const msg = errorMessage(err, "Failed to generate shipping label");
       setLabelError(msg);
@@ -161,7 +160,28 @@ export default function ShippingLabel() {
           refType="shipping"
           refId={reprint.id}
           refLabel={reprint.shipping_no}
-          onConfirmed={() => reload()}
+          onConfirmed={async ({ reason, watermark, reprintCount, requestId, actorId, actorName }) => {
+            const result = await executeAtomicGovernedReprint({
+              surface: "shipping",
+              refId: reprint.id,
+              barcodeIdentity: reprint.shipping_no,
+              qrIdentity: reprint.qr_ref,
+              payload: buildShippingLabelPayload({
+                consignee: reprint.consignee,
+                invoiceRef: reprint.invoice_ref,
+                shippingNo: reprint.shipping_no,
+                qrRef: reprint.qr_ref,
+              }),
+              reprintReason: reason,
+              reprintCount,
+              reprintRequestId: requestId,
+              watermark,
+              actorId,
+              actorName,
+            });
+            if (result.ok === false) throw new Error(result.message);
+            await reload();
+          }}
         />
       )}
     </div>

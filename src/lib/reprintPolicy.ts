@@ -57,7 +57,7 @@ export function parseReason(reason?: string | null): ParsedReason {
   return out;
 }
 
-/** Count how many times this ref has already been printed (prints + reprints). */
+/** Count how many times this ref has already been reprinted. */
 export async function getReprintCount(refType: ReprintRefType, refId: string): Promise<number> {
   const logs = await listTable<PrintLogRow>("ols_print_logs");
   return logs.filter(l => l.ref_type === refType && l.ref_id === refId && l.is_reprint).length;
@@ -109,17 +109,10 @@ export async function createPendingRequest(opts: {
   refType: ReprintRefType; refId: string; refLabel: string;
   parsed: ParsedReason;
 }): Promise<ReprintRow> {
-  // Deliberately does NOT catch-and-return-null here: `ols_reprint_requests`
-  // is the governance record of *why* a queued reprint was authorized. If
-  // this write fails, the caller must find out (and show the operator a real
-  // failure) rather than being told "queued for approval" while nothing was
-  // actually persisted. See ReprintModal.tsx's confirm() for the surfacing.
   const row = await insertRow<ReprintRow>("ols_reprint_requests", {
     ref_type: opts.refType, ref_id: opts.refId,
     reason: packReason(opts.parsed), status: "pending",
   });
-  // audit() never throws (it queues offline on failure) — a failed audit
-  // mirror must not undo an already-durable pending request.
   await audit({
     action: "reprint_requested", entity_type: opts.refType, entity_id: opts.refId,
     details: { ref: opts.refLabel, ...opts.parsed },
@@ -127,17 +120,26 @@ export async function createPendingRequest(opts: {
   return row;
 }
 
-export async function approveRequest(row: ReprintRow, approver: string, remarks?: string) {
+export async function approveRequest(
+  row: ReprintRow,
+  approver: string,
+  remarks?: string,
+  approverId?: string,
+) {
+  if (supabaseConfigured && !approverId) {
+    throw new Error("Authenticated approver identity is required in live mode");
+  }
   const parsed = parseReason(row.reason);
   parsed.approver = approver;
   if (remarks) parsed.remarks = remarks;
   await updateRow("ols_reprint_requests", row.id, {
     status: "approved",
+    approved_by: approverId ?? null,
     reason: packReason(parsed),
   });
   await audit({
     action: "reprint_approved", entity_type: row.ref_type, entity_id: row.ref_id,
-    details: { approver, remarks },
+    details: { approver, approver_id: approverId, remarks },
   });
   return parsed;
 }
