@@ -8,7 +8,6 @@
 
 export const DEVICE_SURFACE_CONTRACT_VERSION = "1.0";
 
-/** Responsive breakpoints referenced by Trace scan / layout surfaces. */
 export const MOBILE_BREAKPOINT_PX = 768;
 export const HANDHELD_MAX_WIDTH_PX = 1024;
 export const FAST_SCAN_BREAKPOINT_PX = 640;
@@ -36,7 +35,6 @@ export interface TraceRouteSurfaceRow {
   deviceIntent: Record<DeviceSurface, RouteAccessMode>;
   primaryCapabilities: DeviceCapability[];
   responsiveNotes: string;
-  /** Known embedding gaps — software census only, not physical UAT claims. */
   embeddingBlockers: string[];
   sources: string[];
   tests: string[];
@@ -54,7 +52,6 @@ export interface CapabilityCheckResult {
   guidance: string;
 }
 
-/** Canonical route / surface census for Point 99 embedding closure. */
 export const TRACE_ROUTE_SURFACE_CENSUS: TraceRouteSurfaceRow[] = [
   {
     route: "/",
@@ -237,53 +234,47 @@ export const TRACE_ROUTE_SURFACE_CENSUS: TraceRouteSurfaceRow[] = [
 const TV_UA_RE = /SmartTV|Smart-TV|GoogleTV|AppleTV|Tizen|Web0S|WebOS|HbbTV|NetCast|BRAVIA|AFT[A-Z]|CrKey|TV Safari/i;
 const HANDHELD_UA_RE = /Zebra|Honeywell|Datalogic|Intermec|Symbol|MC33|TC52|TC57|CK65|Scanner/i;
 
-const CAPABILITY_BY_SURFACE: Record<DeviceSurface, ReadonlySet<DeviceCapability>> = {
-  pc: new Set([
-    "navigate", "keyboard_wedge_scan", "camera_scan", "central_submit",
-    "offline_queue_view", "print_command", "reprint", "admin_settings",
-    "production_write", "finance_write", "reports_export",
-  ]),
-  mobile: new Set([
-    "navigate", "keyboard_wedge_scan", "central_submit", "offline_queue_view",
-  ]),
-  handheld: new Set([
-    "navigate", "keyboard_wedge_scan", "central_submit", "offline_queue_view",
-    "finance_write",
-  ]),
-  tv: new Set(["navigate", "offline_queue_view"]),
-};
+const PC_CAPABILITIES = new Set<DeviceCapability>([
+  "navigate", "keyboard_wedge_scan", "camera_scan", "central_submit",
+  "offline_queue_view", "print_command", "reprint", "admin_settings",
+  "production_write", "finance_write", "reports_export",
+]);
+const MOBILE_CAPABILITIES = new Set<DeviceCapability>([
+  "navigate", "keyboard_wedge_scan", "central_submit", "offline_queue_view",
+]);
+const HANDHELD_CAPABILITIES = new Set<DeviceCapability>([
+  "navigate", "keyboard_wedge_scan", "central_submit", "offline_queue_view", "finance_write",
+]);
+const TV_CAPABILITIES = new Set<DeviceCapability>(["navigate", "offline_queue_view"]);
 
-const GUIDANCE: Record<DeviceSurface, Partial<Record<DeviceCapability, string>>> = {
-  pc: {},
-  mobile: {
-    print_command: "Label print and template setup require a PC operations station.",
-    reprint: "Reprint approval is available on PC only.",
-    admin_settings: "Admin settings require a PC browser.",
-    production_write: "Production entry is desktop-only.",
-    finance_write: "Full finance PI approval is desktop-only; scan verification is available on /finance.",
-    reports_export: "Report export requires a PC browser.",
-    camera_scan: "Camera scanning is not implemented — use keyboard-wedge or manual entry.",
-  },
-  handheld: {
-    print_command: "Label generation requires a PC — use this device for scan verification only.",
-    reprint: "Reprint controls are PC-only.",
-    admin_settings: "Admin settings require a PC browser.",
-    production_write: "Production entry is desktop-only.",
-    reports_export: "Report export requires a PC browser.",
-    camera_scan: "Camera scanning is not implemented — keyboard-wedge input is the approved path.",
-  },
-  tv: {
-    keyboard_wedge_scan: "TV displays are read-only — use a PC or handheld scanner at the gate.",
-    central_submit: "Central submit is disabled on TV — scan at a PC or handheld station.",
-    print_command: "Print controls are hidden on TV displays.",
-    reprint: "Reprint controls are hidden on TV displays.",
-    admin_settings: "Admin settings are not available on TV displays.",
-    production_write: "Production writes are not available on TV displays.",
-    finance_write: "Finance writes are not available on TV displays.",
-    reports_export: "Report export is not available on TV displays.",
-    camera_scan: "Camera scanning is not available on TV displays.",
-  },
-};
+const MOBILE_GUIDANCE = new Map<DeviceCapability, string>([
+  ["print_command", "Label print and template setup require a PC operations station."],
+  ["reprint", "Reprint approval is available on PC only."],
+  ["admin_settings", "Admin settings require a PC browser."],
+  ["production_write", "Production entry is desktop-only."],
+  ["finance_write", "Full finance PI approval is desktop-only; scan verification is available on /finance."],
+  ["reports_export", "Report export requires a PC browser."],
+  ["camera_scan", "Camera scanning is not implemented — use keyboard-wedge or manual entry."],
+]);
+const HANDHELD_GUIDANCE = new Map<DeviceCapability, string>([
+  ["print_command", "Label generation requires a PC — use this device for scan verification only."],
+  ["reprint", "Reprint controls are PC-only."],
+  ["admin_settings", "Admin settings require a PC browser."],
+  ["production_write", "Production entry is desktop-only."],
+  ["reports_export", "Report export requires a PC browser."],
+  ["camera_scan", "Camera scanning is not implemented — keyboard-wedge input is the approved path."],
+]);
+const TV_GUIDANCE = new Map<DeviceCapability, string>([
+  ["keyboard_wedge_scan", "TV displays are read-only — use a PC or handheld scanner at the gate."],
+  ["central_submit", "Central submit is disabled on TV — scan at a PC or handheld station."],
+  ["print_command", "Print controls are hidden on TV displays."],
+  ["reprint", "Reprint controls are hidden on TV displays."],
+  ["admin_settings", "Admin settings are not available on TV displays."],
+  ["production_write", "Production writes are not available on TV displays."],
+  ["finance_write", "Finance writes are not available on TV displays."],
+  ["reports_export", "Report export is not available on TV displays."],
+  ["camera_scan", "Camera scanning is not available on TV displays."],
+]);
 
 export interface DeviceSurfaceDetectInput {
   widthPx: number;
@@ -315,7 +306,34 @@ export function detectDeviceSurface(input: DeviceSurfaceDetectInput): DeviceSurf
 
 export function censusRowForRoute(pathname: string): TraceRouteSurfaceRow | undefined {
   const path = pathname.split("?")[0].replace(/\/$/, "") || "/";
-  return TRACE_ROUTE_SURFACE_CENSUS.find(r => r.route === path);
+  return TRACE_ROUTE_SURFACE_CENSUS.find(row => row.route === path);
+}
+
+function routeModeForSurface(row: TraceRouteSurfaceRow, surface: DeviceSurface): RouteAccessMode {
+  switch (surface) {
+    case "pc": return row.deviceIntent.pc;
+    case "mobile": return row.deviceIntent.mobile;
+    case "handheld": return row.deviceIntent.handheld;
+    case "tv": return row.deviceIntent.tv;
+  }
+}
+
+function capabilitiesForSurface(surface: DeviceSurface): ReadonlySet<DeviceCapability> {
+  switch (surface) {
+    case "pc": return PC_CAPABILITIES;
+    case "mobile": return MOBILE_CAPABILITIES;
+    case "handheld": return HANDHELD_CAPABILITIES;
+    case "tv": return TV_CAPABILITIES;
+  }
+}
+
+function guidanceForSurface(surface: DeviceSurface, capability: DeviceCapability): string | undefined {
+  switch (surface) {
+    case "pc": return undefined;
+    case "mobile": return MOBILE_GUIDANCE.get(capability);
+    case "handheld": return HANDHELD_GUIDANCE.get(capability);
+    case "tv": return TV_GUIDANCE.get(capability);
+  }
 }
 
 export function routeAccessForSurface(pathname: string, surface: DeviceSurface): RouteAccessResult {
@@ -327,7 +345,7 @@ export function routeAccessForSurface(pathname: string, surface: DeviceSurface):
       readOnly: surface === "tv",
     };
   }
-  const mode = row.deviceIntent[surface];
+  const mode = routeModeForSurface(row, surface);
   if (mode === "blocked") {
     return {
       allowed: false,
@@ -344,7 +362,7 @@ export function routeAccessForSurface(pathname: string, surface: DeviceSurface):
 }
 
 export function blockedRouteGuidance(route: string, surface: DeviceSurface): string {
-  const row = TRACE_ROUTE_SURFACE_CENSUS.find(r => r.route === route);
+  const row = TRACE_ROUTE_SURFACE_CENSUS.find(candidate => candidate.route === route);
   const label = row?.label ?? route;
   switch (surface) {
     case "tv":
@@ -359,23 +377,23 @@ export function blockedRouteGuidance(route: string, surface: DeviceSurface): str
       return `${label} requires a PC operations station. Mobile devices can access scan-critical routes: Gate Scan, Cartonization, Finance PI, Dashboard, and Traceability.`;
     case "handheld":
       return `${label} requires a PC for write/print operations. Handheld scanners support Gate Scan, Cartonization scan flows, Finance PI scan, Dashboard, and Traceability.`;
-    default:
+    case "pc":
       return `${label} is not available on this surface.`;
   }
 }
 
 export function isCapabilityAllowed(surface: DeviceSurface, capability: DeviceCapability): CapabilityCheckResult {
-  const allowed = CAPABILITY_BY_SURFACE[surface].has(capability);
+  const allowed = capabilitiesForSurface(surface).has(capability);
   return {
     allowed,
     guidance: allowed
       ? ""
-      : (GUIDANCE[surface][capability] ?? `Capability "${capability}" is not supported on ${surface} surfaces.`),
+      : (guidanceForSurface(surface, capability) ?? `Capability "${capability}" is not supported on ${surface} surfaces.`),
   };
 }
 
 export function navRoutesForSurface(surface: DeviceSurface): TraceRouteSurfaceRow[] {
-  return TRACE_ROUTE_SURFACE_CENSUS.filter(r => r.deviceIntent[surface] !== "blocked");
+  return TRACE_ROUTE_SURFACE_CENSUS.filter(row => routeModeForSurface(row, surface) !== "blocked");
 }
 
 export function isFastScanLayout(widthPx: number): boolean {
