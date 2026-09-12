@@ -17,6 +17,7 @@ vi.mock("@/lib/data", () => ({
         id: "lbl-1",
         label_no: "PL-20260906-0001",
         mfg_date: "2026-09-06",
+        best_before: "2026-12-05",
         net_weight: 5,
         gross_weight: 5.25,
         metadata: { product_name: "Test", sku: "SKU-1", batch_no: "BAT-1" },
@@ -33,6 +34,12 @@ vi.mock("@/lib/data", () => ({
         metadata: { barcode_mode: "legacy", legacy_carton_no: "CTN-20260906-0001" },
       }];
     }
+    if (table === "ols_carton_contents") {
+      return [
+        { id: "cc-1", carton_id: "ctn-1", production_label_id: "lbl-1" },
+        { id: "cc-2", carton_id: "ctn-1", manual_sku: "SKU-2", manual_qty: 2 },
+      ];
+    }
     if (table === "ols_shipping_labels") {
       return [{
         id: "ship-1",
@@ -45,7 +52,7 @@ vi.mock("@/lib/data", () => ({
     return [];
   }),
   insertRow: vi.fn(async (table: string, row: Record<string, unknown>) => {
-    const full = { id: `${table}-1`, ...row };
+    const full = { id: `${table}-${inserted.length + 1}`, ...row };
     inserted.push({ table, row: full });
     return full;
   }),
@@ -53,6 +60,7 @@ vi.mock("@/lib/data", () => ({
 
 import {
   executeGovernedPrint,
+  executeGovernedPrintBatch,
   executeGovernedReprint,
   rebuildGovernedPrintRequest,
   resolveTemplateForSurface,
@@ -136,9 +144,7 @@ describe("verifyPrintEquivalence", () => {
 
   it("verifies shipping QR derivation equivalence", () => {
     const shp = "SHP-20260906-0001";
-    const payload = buildShippingLabelPayload({
-      shippingNo: shp, qrRef: "QR-202609060001",
-    });
+    const payload = buildShippingLabelPayload({ shippingNo: shp, qrRef: "QR-202609060001" });
     const v = verifyPrintEquivalence(
       payload,
       shp,
@@ -147,6 +153,21 @@ describe("verifyPrintEquivalence", () => {
     );
     expect(v.ok).toBe(true);
     expect(v.qrMatchesShipping).toBe(true);
+  });
+
+  it("fails closed when a canonical shipping QR is required but payload QR is missing", () => {
+    const shp = "SHP-20260906-0001";
+    const payload = buildShippingLabelPayload({ shippingNo: shp, qrRef: "QR-202609060001" });
+    delete payload.qr;
+    const v = verifyPrintEquivalence(
+      payload,
+      shp,
+      { name: "Shipping", version: "v1", labelType: "shipping", widthMm: 100, heightMm: 150, commandLang: "TSPL" },
+      { qrIdentity: "QR-202609060001" },
+    );
+    expect(v.ok).toBe(false);
+    expect(v.qrMatchesShipping).toBe(false);
+    expect(v.message).toContain("qr=missing");
   });
 });
 
@@ -166,11 +187,10 @@ describe("executeGovernedPrint", () => {
     if (result.ok) {
       expect(result.state).toBe("GENERATED");
       expect(result.command).toContain("PL-20260906-0001");
-      expect(inserted.some(r => r.table === "ols_print_jobs")).toBe(true);
-      expect(inserted.some(r => r.table === "ols_print_logs")).toBe(true);
       const log = inserted.find(r => r.table === "ols_print_logs")?.row;
       expect(String(log?.reason)).toContain("identity=PL-20260906-0001");
       expect(String(log?.reason)).toContain("job=GENERATED");
+      expect(String(log?.reason)).toContain("actor=operator@oasis");
     }
   });
 
@@ -188,6 +208,40 @@ describe("executeGovernedPrint", () => {
     if (result.ok === false) expect(result.code).toBe("identity_preview");
     expect(inserted).toHaveLength(0);
   });
+
+  it("fails closed when a supplied printer id cannot be resolved", async () => {
+    const result = await executeGovernedPrint({
+      surface: "production_label",
+      refId: "lbl-1",
+      barcodeIdentity: "PL-20260906-0001",
+      printerId: "missing-printer",
+      payload: buildProductionLabelPayload({
+        batchNo: "B", mfgDate: "2026-01-01", shelfLifeDays: 1,
+        netWeight: 1, grossWeight: 1, labelNo: "PL-20260906-0001",
+      }),
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok === false) expect(result.code).toBe("unsupported_transport");
+    expect(inserted).toHaveLength(0);
+  });
+});
+
+describe("executeGovernedPrintBatch", () => {
+  it("preserves actor attribution in batch print logs", async () => {
+    const result = await executeGovernedPrintBatch([{
+      surface: "production_label",
+      refId: "lbl-1",
+      barcodeIdentity: "PL-20260906-0001",
+      actorName: "batch.operator@oasis",
+      payload: buildProductionLabelPayload({
+        batchNo: "BAT-1", mfgDate: "2026-09-06", shelfLifeDays: 90,
+        netWeight: 5, grossWeight: 5.25, labelNo: "PL-20260906-0001",
+      }),
+    }]);
+    expect(result.results[0]?.ok).toBe(true);
+    const log = inserted.find(r => r.table === "ols_print_logs")?.row;
+    expect(String(log?.reason)).toContain("actor=batch.operator@oasis");
+  });
 });
 
 describe("executeGovernedReprint — invariance and reason", () => {
@@ -197,9 +251,7 @@ describe("executeGovernedReprint — invariance and reason", () => {
       refId: "ship-1",
       barcodeIdentity: "SHP-20260906-0001",
       qrIdentity: "QR-202609060001",
-      payload: buildShippingLabelPayload({
-        shippingNo: "SHP-20260906-0001", qrRef: "QR-202609060001",
-      }),
+      payload: buildShippingLabelPayload({ shippingNo: "SHP-20260906-0001", qrRef: "QR-202609060001" }),
       reprintReason: "",
       isReprint: true,
       reprintCount: 1,
@@ -214,9 +266,7 @@ describe("executeGovernedReprint — invariance and reason", () => {
       refId: "ship-1",
       barcodeIdentity: "SHP-20260906-0001",
       qrIdentity: "QR-202609060001",
-      payload: buildShippingLabelPayload({
-        shippingNo: "SHP-20260906-0001", qrRef: "QR-202609060001",
-      }),
+      payload: buildShippingLabelPayload({ shippingNo: "SHP-20260906-0001", qrRef: "QR-202609060001" }),
       reprintReason: "Damaged label",
       reprintCount: 1,
       watermark: "DUPLICATE COPY",
@@ -240,6 +290,22 @@ describe("rebuildGovernedPrintRequest", () => {
       expect(req.barcodeIdentity).toBe("SHP-20260906-0001");
       expect(req.qrIdentity).toBe("QR-202609060001");
       expect(req.payload.barcode).toBe("SHP-20260906-0001");
+    }
+  });
+
+  it("rebuilds production shelf-life from persisted mfg/best-before dates", async () => {
+    const req = await rebuildGovernedPrintRequest("production_label", "lbl-1");
+    expect("ok" in req && req.ok === false).toBe(false);
+    if (!("ok" in req)) {
+      expect(req.payload.lines.some(line => line.includes("Shelf 90d"))).toBe(true);
+    }
+  });
+
+  it("rebuilds carton item count from persisted carton contents", async () => {
+    const req = await rebuildGovernedPrintRequest("carton", "ctn-1");
+    expect("ok" in req && req.ok === false).toBe(false);
+    if (!("ok" in req)) {
+      expect(req.payload.lines.some(line => line.includes("Items 2"))).toBe(true);
     }
   });
 });
