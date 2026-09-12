@@ -53,6 +53,7 @@ export default function Cartonization() {
   const [identityResult, setIdentityResult] = useState<ScanFlowResult | null>(null);
   const [submitResult, setSubmitResult] = useState<CentralSubmitResult | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [finalizing, setFinalizing] = useState(false);
   const [cartonError, setCartonError] = useState<string | null>(null);
   const { session, canSubmitCentral } = useOlsSession();
   const { can, capabilityGuidance } = useDeviceSurface();
@@ -91,9 +92,6 @@ export default function Cartonization() {
         toast.error(createCheck.message || "Failed to create carton", { duration: Infinity });
         return;
       }
-      // carton_no is Trace-allocated (barcodeIdentity.ts) and can collide under
-      // concurrent multi-terminal use — retry with a fresh id (and matching
-      // metadata) on a confirmed unique-constraint violation, bounded.
       const c = await insertWithUniqueRetry<Carton>("ols_cartons", async () => {
         const legacyNo = await productionNum.carton();
         const cartonIndex = await allocateNextCartonIndex(orderRef);
@@ -113,11 +111,8 @@ export default function Cartonization() {
       setIdentityResult(null);
       setSubmitResult(null);
       const display = resolveCartonBarcodeDisplay(orderRef, c.carton_no, c.metadata);
-      if (display.centralBarcode) {
-        toast.success(`Carton started · Central barcode ${display.centralBarcode}`);
-      } else {
-        toast.success(`Carton ${c.carton_no} created (legacy/local barcode)`);
-      }
+      if (display.centralBarcode) toast.success(`Carton started · Central barcode ${display.centralBarcode}`);
+      else toast.success(`Carton ${c.carton_no} created (legacy/local barcode)`);
     } catch (err: unknown) {
       const msg = errorMessage(err, "Failed to create carton");
       setCartonError(msg);
@@ -164,13 +159,7 @@ export default function Cartonization() {
       }
       const lbl = labels.find(l => l.label_no === plCheck.normalized);
       if (!lbl) { feedback("error"); toast.error("Label not found", { description: "Use manual add if needed." }); return; }
-      const addCheck = validateAddContent({
-        carton,
-        labelId: lbl.id,
-        label: lbl,
-        existingContents: contents,
-        packedLabelIds: packed,
-      });
+      const addCheck = validateAddContent({ carton, labelId: lbl.id, label: lbl, existingContents: contents, packedLabelIds: packed });
       if (!addCheck.ok) {
         feedback(addCheck.code === "label_already_packed" || addCheck.code === "duplicate_label" ? "dup" : "error");
         toast.error(addCheck.message || "Cannot add label");
@@ -206,6 +195,8 @@ export default function Cartonization() {
   }
 
   async function finalizeCarton() {
+    if (finalizing) return;
+    setFinalizing(true);
     try {
       setCartonError(null);
       if (!can("print_command")) {
@@ -215,12 +206,7 @@ export default function Cartonization() {
         return;
       }
       if (!carton || contents.length === 0) { toast.error("Add at least one label"); return; }
-      const sealCheck = validateSealCarton({
-        carton,
-        contents,
-        labels,
-        identityVerified: !!identityResult?.ok,
-      });
+      const sealCheck = validateSealCarton({ carton, contents, labels, identityVerified: !!identityResult?.ok });
       if (!sealCheck.ok) {
         toast.error(sealCheck.message || "Cannot seal carton", { description: sealCheck.details?.join("; ") });
         return;
@@ -261,12 +247,12 @@ export default function Cartonization() {
       const msg = errorMessage(err, "Failed to finalize carton");
       setCartonError(msg);
       toast.error(msg, { duration: Infinity });
+    } finally {
+      setFinalizing(false);
     }
   }
 
-
-  const identitySyncStatus: CentralScanSyncStatus =
-    submitResult?.status ?? identityResult?.centralSyncStatus ?? "preview_only";
+  const identitySyncStatus: CentralScanSyncStatus = submitResult?.status ?? identityResult?.centralSyncStatus ?? "preview_only";
 
   async function handleSubmitCentral() {
     if (!identityResult?.payload || !identityResult.idempotencyKey) return;
@@ -321,11 +307,7 @@ export default function Cartonization() {
   const fastScan = typeof window !== "undefined" && window.matchMedia("(max-width: 640px)").matches;
   return (
     <div className={fastScan ? "ols-fast-scan" : undefined}>
-      <PageHeader
-        eyebrow="Dispatch"
-        title="Cartonization & Packing"
-        description="Verify CTN-SO carton identity, then scan production labels into the carton."
-      />
+      <PageHeader eyebrow="Dispatch" title="Cartonization & Packing" description="Verify CTN-SO carton identity, then scan production labels into the carton." />
 
       <div className="grid gap-6 lg:grid-cols-5">
         <div className="ols-card p-5 lg:col-span-3">
@@ -343,10 +325,10 @@ export default function Cartonization() {
               <Button
                 variant="outline"
                 onClick={finalizeCarton}
-                disabled={!can("print_command")}
+                disabled={!can("print_command") || finalizing}
                 title={!can("print_command") ? capabilityGuidance("print_command") : undefined}
               >
-                <Printer size={16} className="mr-1.5" /> Pack & Generate Carton Label
+                <Printer size={16} className="mr-1.5" /> {finalizing ? "Finalizing…" : "Pack & Generate Carton Label"}
               </Button>
             )}
           </div>
@@ -364,14 +346,8 @@ export default function Cartonization() {
                   <p className="ols-section-title">Active carton</p>
                   <p className="font-mono text-lg font-semibold">{carton.carton_no}</p>
                   <p className="text-xs text-muted-foreground">{carton.order_ref} · {carton.customer_name}</p>
-                  {barcodeDisplay?.centralBarcode && (
-                    <p className="mt-1 font-mono text-xs text-primary">
-                      Central barcode: {barcodeDisplay.centralBarcode}
-                    </p>
-                  )}
-                  <p className="font-mono text-[11px] text-muted-foreground">
-                    Legacy/local barcode: {barcodeDisplay?.legacyBarcode || carton.carton_no}
-                  </p>
+                  {barcodeDisplay?.centralBarcode && <p className="mt-1 font-mono text-xs text-primary">Central barcode: {barcodeDisplay.centralBarcode}</p>}
+                  <p className="font-mono text-[11px] text-muted-foreground">Legacy/local barcode: {barcodeDisplay?.legacyBarcode || carton.carton_no}</p>
                 </div>
                 <StatusPill status="draft" />
               </div>
@@ -398,9 +374,7 @@ export default function Cartonization() {
                     userMessage={identityResult?.userMessage}
                     syncStatus={identitySyncStatus}
                     canSubmit={canSubmitCentral}
-                    submitDisabledReason={
-                      !canSubmitCentral ? "Dispatch or security role required (JWT ols_roles)" : undefined
-                    }
+                    submitDisabledReason={!canSubmitCentral ? "Dispatch or security role required (JWT ols_roles)" : undefined}
                     onSubmitToCentral={handleSubmitCentral}
                     onRetry={handleRetryCentral}
                     submitting={submitting}
@@ -457,9 +431,7 @@ export default function Cartonization() {
                 `Order ${carton?.order_ref || "—"}`,
                 `Carton ${carton?.carton_index ?? "—"} · Items ${contents.length}`,
                 `Net ${contents.reduce((s, c) => s + (c.label?.net_weight || 0), 0).toFixed(2)} kg`,
-                barcodeDisplay?.centralBarcode
-                  ? `Central ${barcodeDisplay.centralBarcode}`
-                  : `Legacy ${barcodeDisplay?.legacyBarcode || "—"}`,
+                barcodeDisplay?.centralBarcode ? `Central ${barcodeDisplay.centralBarcode}` : `Legacy ${barcodeDisplay?.legacyBarcode || "—"}`,
               ]}
               barcode={barcodeDisplay?.labelBarcode || "CTN-PREVIEW-0001"}
             />
