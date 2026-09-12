@@ -12,6 +12,16 @@ import {
   rebuildGovernedPrintRequest,
 } from "@/lib/governedPrint";
 
+const SUPPORTED_REPRINT_SURFACES = new Set<ReprintRefType>([
+  "production_label",
+  "carton",
+  "shipping",
+]);
+
+function isSupportedReprintSurface(value: string): value is ReprintRefType {
+  return SUPPORTED_REPRINT_SURFACES.has(value as ReprintRefType);
+}
+
 export default function PrintLogs() {
   const [logs, setLogs] = useState<PrintLogRow[]>([]);
   const [reprint, setReprint] = useState<PrintLogRow | null>(null);
@@ -37,36 +47,43 @@ export default function PrintLogs() {
               </tr>
             </thead>
             <tbody>
-              {logs.map(l => (
-                <tr key={l.id} className="border-t">
-                  <td className="px-3 py-2 text-xs text-muted-foreground">{new Date(l.created_at).toLocaleString()}</td>
-                  <td className="px-3 py-2 capitalize">{l.ref_type}</td>
-                  <td className="px-3 py-2 font-mono text-xs">{l.ref_id?.slice(0, 8)}</td>
-                  <td className="px-3 py-2">{l.is_reprint ? `× ${l.reprint_count}` : "—"}</td>
-                  <td className="px-3 py-2 text-xs text-muted-foreground">{l.reason || l.metadata?.reason || "—"}</td>
-                  <td className="px-3 py-2">{l.success ? "✅" : "⚠"}</td>
-                  <td className="px-3 py-2 text-right">
-                    <Button size="sm" variant="ghost" onClick={() => setReprint(l)}>
-                      <Printer size={12} className="mr-1" /> Reprint
-                    </Button>
-                  </td>
-                </tr>
-              ))}
+              {logs.map(l => {
+                const canReprint = isSupportedReprintSurface(l.ref_type);
+                return (
+                  <tr key={l.id} className="border-t">
+                    <td className="px-3 py-2 text-xs text-muted-foreground">{new Date(l.created_at).toLocaleString()}</td>
+                    <td className="px-3 py-2 capitalize">{l.ref_type}</td>
+                    <td className="px-3 py-2 font-mono text-xs">{l.ref_id?.slice(0, 8)}</td>
+                    <td className="px-3 py-2">{l.is_reprint ? `× ${l.reprint_count}` : "—"}</td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground">{l.reason || l.metadata?.reason || "—"}</td>
+                    <td className="px-3 py-2">{l.success ? "✅" : "⚠"}</td>
+                    <td className="px-3 py-2 text-right">
+                      {canReprint ? (
+                        <Button size="sm" variant="ghost" onClick={() => setReprint(l)}>
+                          <Printer size={12} className="mr-1" /> Reprint
+                        </Button>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">Unsupported</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
       </div>
 
-      {reprint && (
+      {reprint && isSupportedReprintSurface(reprint.ref_type) && (
         <ReprintModal
           open={!!reprint}
           onOpenChange={(o) => !o && setReprint(null)}
-          refType={reprint.ref_type as ReprintRefType}
+          refType={reprint.ref_type}
           refId={reprint.ref_id || ""}
           refLabel={`${reprint.ref_type} ${reprint.ref_id?.slice(0, 8)}`}
           onConfirmed={async ({ reason, watermark, reprintCount, requestId, actorId, actorName }) => {
             const rebuilt = await rebuildGovernedPrintRequest(
-              reprint.ref_type as ReprintRefType,
+              reprint.ref_type,
               reprint.ref_id || "",
             );
             if ("code" in rebuilt) throw new Error(rebuilt.message);
