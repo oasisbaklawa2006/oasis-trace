@@ -14,7 +14,6 @@ export const HANDHELD_MAX_WIDTH_PX = 1024;
 export const FAST_SCAN_BREAKPOINT_PX = 640;
 
 export type DeviceSurface = "pc" | "mobile" | "handheld" | "tv";
-
 export type RouteAccessMode = "full" | "scan" | "read" | "blocked";
 
 export type DeviceCapability =
@@ -171,10 +170,10 @@ export const TRACE_ROUTE_SURFACE_CENSUS: TraceRouteSurfaceRow[] = [
     route: "/gate",
     label: "Gate Scan",
     group: "Security",
-    deviceIntent: { pc: "full", mobile: "scan", handheld: "scan", tv: "read" },
+    deviceIntent: { pc: "full", mobile: "scan", handheld: "scan", tv: "blocked" },
     primaryCapabilities: ["keyboard_wedge_scan", "central_submit", "offline_queue_view"],
-    responsiveNotes: "ols-fast-scan at ≤640px; h-14 input; autofocus on mount",
-    embeddingBlockers: ["TV: status/history read-only — scan input disabled"],
+    responsiveNotes: "ols-fast-scan at ≤640px; h-14 input; autofocus on mount; TV uses dedicated /tv/gate kiosk",
+    embeddingBlockers: ["Generic Gate Scan contains mutation controls and is blocked on TV; use /tv/gate"],
     sources: ["src/pages/GateScan.tsx", "src/lib/scanSubmitQueue.ts"],
     tests: ["src/lib/deviceSurfaceContract.test.ts"],
   },
@@ -193,10 +192,10 @@ export const TRACE_ROUTE_SURFACE_CENSUS: TraceRouteSurfaceRow[] = [
     route: "/print-logs",
     label: "Print Logs",
     group: "Operations",
-    deviceIntent: { pc: "full", mobile: "blocked", handheld: "blocked", tv: "read" },
+    deviceIntent: { pc: "full", mobile: "blocked", handheld: "blocked", tv: "blocked" },
     primaryCapabilities: ["reprint", "navigate"],
-    responsiveNotes: "Table view; reprint actions PC-only",
-    embeddingBlockers: ["TV exposes logs read-only — reprint controls hidden"],
+    responsiveNotes: "Interactive print-log/reprint table is PC-only; TV uses dedicated dispatch kiosk",
+    embeddingBlockers: ["Generic Print Logs contains reprint controls and is blocked on TV; use /tv/dispatch"],
     sources: ["src/pages/PrintLogs.tsx"],
     tests: ["src/lib/deviceSurfaceContract.test.ts"],
   },
@@ -237,7 +236,6 @@ export const TRACE_ROUTE_SURFACE_CENSUS: TraceRouteSurfaceRow[] = [
 
 const TV_UA_RE = /SmartTV|Smart-TV|GoogleTV|AppleTV|Tizen|Web0S|WebOS|HbbTV|NetCast|BRAVIA|AFT[A-Z]|CrKey|TV Safari/i;
 const HANDHELD_UA_RE = /Zebra|Honeywell|Datalogic|Intermec|Symbol|MC33|TC52|TC57|CK65|Scanner/i;
-
 const SURFACE_OVERRIDE_KEY = "ols_device_surface";
 
 const CAPABILITY_BY_SURFACE: Record<DeviceSurface, ReadonlySet<DeviceCapability>> = {
@@ -308,11 +306,9 @@ export function parseDeviceSurfaceOverride(raw: string | null | undefined): Devi
 export function detectDeviceSurface(input: DeviceSurfaceDetectInput): DeviceSurface {
   const override = parseDeviceSurfaceOverride(input.override ?? undefined);
   if (override) return override;
-
   const ua = input.userAgent ?? "";
   if (TV_UA_RE.test(ua)) return "tv";
   if (HANDHELD_UA_RE.test(ua)) return "handheld";
-
   if (input.widthPx < MOBILE_BREAKPOINT_PX) return "mobile";
   if (input.coarsePointer && input.widthPx <= HANDHELD_MAX_WIDTH_PX) return "handheld";
   return "pc";
@@ -351,7 +347,6 @@ export function routeAccessForSurface(pathname: string, surface: DeviceSurface):
       readOnly: surface === "tv",
     };
   }
-
   const mode = row.deviceIntent[surface];
   if (mode === "blocked") {
     return {
@@ -361,7 +356,6 @@ export function routeAccessForSurface(pathname: string, surface: DeviceSurface):
       guidance: blockedRouteGuidance(row.route, surface),
     };
   }
-
   return {
     allowed: true,
     mode,
@@ -374,7 +368,13 @@ export function blockedRouteGuidance(route: string, surface: DeviceSurface): str
   const label = row?.label ?? route;
   switch (surface) {
     case "tv":
-      return `${label} is not available on TV displays. Use Dashboard, Gate status, Traceability, or Print Logs for read-only monitoring.`;
+      if (route === "/gate") {
+        return `${label} is not available on TV displays. Use the dedicated /tv/gate kiosk for read-only gate monitoring.`;
+      }
+      if (route === "/print-logs") {
+        return `${label} is not available on TV displays. Use the dedicated /tv/dispatch kiosk for read-only dispatch monitoring.`;
+      }
+      return `${label} is not available on TV displays. Use Dashboard, Traceability, /tv/gate, or /tv/dispatch for read-only monitoring.`;
     case "mobile":
       return `${label} requires a PC operations station. Mobile devices can access scan-critical routes: Gate Scan, Cartonization, Finance PI, Dashboard, and Traceability.`;
     case "handheld":
