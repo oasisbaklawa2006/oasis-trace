@@ -44,7 +44,7 @@ function validateIdentity(surface: GovernedPrintRequest["surface"], raw: string)
     return { ok: false, code: "template_unavailable", message: `Governed reprint not supported for ${surface}` };
   }
   const result = validateBarcodeIdentity(raw);
-  if (!result.ok) {
+  if (result.ok === false) {
     return { ok: false, code: rejectionCode(result.code), message: result.message };
   }
   if (!allowed.includes(result.kind)) {
@@ -100,7 +100,7 @@ export async function executeAtomicGovernedReprint(
   }
 
   const identity = validateIdentity(req.surface, req.barcodeIdentity);
-  if (!identity.ok) return identity;
+  if (identity.ok === false) return identity;
 
   const templateResult = await resolveTemplateForSurface(req.surface);
   if ("ok" in templateResult && templateResult.ok === false) return templateResult;
