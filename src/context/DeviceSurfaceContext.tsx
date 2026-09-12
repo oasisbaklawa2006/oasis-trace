@@ -1,5 +1,4 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { useSearchParams } from "react-router-dom";
 import {
   type DeviceCapability,
   type DeviceSurface,
@@ -8,7 +7,6 @@ import {
   type RouteAccessResult,
 } from "@/lib/deviceSurfaceContract";
 import { runtimeRouteAccessForSurface } from "@/lib/deviceSurfaceRuntimePolicy";
-import { supabaseConfigured } from "@/lib/supabase";
 
 export interface DeviceSurfaceContextValue {
   surface: DeviceSurface;
@@ -33,11 +31,6 @@ export function DeviceSurfaceProvider({
   pathname: string;
   children: ReactNode;
 }) {
-  const [searchParams] = useSearchParams();
-  const requestedOverride = searchParams.get("surface");
-  // A URL-controlled surface override is useful for local/demo verification only.
-  // Never allow it to relax live device restrictions.
-  const safeOverride = supabaseConfigured ? null : requestedOverride;
   const [widthPx, setWidthPx] = useState(() =>
     typeof window !== "undefined" ? window.innerWidth : 1280,
   );
@@ -56,15 +49,16 @@ export function DeviceSurfaceProvider({
     return () => mql.removeEventListener("change", onChange);
   }, []);
 
+  // Runtime device authority is derived only from actual viewport/pointer/UA signals.
+  // URL/query/local-storage input must never relax a governed surface restriction.
   const surface = useMemo(
     () =>
       detectDeviceSurface({
         widthPx,
         userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "",
-        override: safeOverride,
         coarsePointer,
       }),
-    [widthPx, safeOverride, coarsePointer],
+    [widthPx, coarsePointer],
   );
 
   const access = useMemo(
