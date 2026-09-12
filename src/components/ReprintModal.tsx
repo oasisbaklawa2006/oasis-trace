@@ -5,16 +5,17 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { insertRow, updateRow } from "@/lib/data";
+import { insertRow, listTable, updateRow } from "@/lib/data";
 import { audit } from "@/lib/audit";
 import { toast } from "sonner";
 import { AlertTriangle, ShieldCheck } from "lucide-react";
 import { useOlsSession } from "@/hooks/useOlsSession";
 import { supabaseConfigured } from "@/lib/supabase";
 import {
-  canOverride, createPendingRequest, getReprintCount, requiresApproval,
+  canOverride, createPendingRequest, getReprintCount, parseReason, requiresApproval,
   type ReprintRefType, type ReprintRow,
 } from "@/lib/reprintPolicy";
+import type { PrintLogRow } from "@/lib/types";
 import { allocateGovernedReprint } from "@/lib/governedReprintAllocation";
 import { errorMessage } from "@/lib/utils";
 
@@ -41,6 +42,37 @@ interface Props {
     actorId?: string;
     actorName?: string;
   }) => void | Promise<void>;
+}
+
+function logContainsRequest(log: PrintLogRow, requestId: string): boolean {
+  const reason = log.reason ?? log.metadata?.reason ?? "";
+  return reason.split("|").some(part => part === `request=${requestId}`);
+}
+
+async function findReusableApprovedRequest(
+  refType: ReprintRefType,
+  refId: string,
+): Promise<ReprintRow | null> {
+  const [requests, logs] = await Promise.all([
+    listTable<ReprintRow>("ols_reprint_requests", { order: "created_at" }),
+    listTable<PrintLogRow>("ols_print_logs", { order: "created_at" }),
+  ]);
+  const candidates = requests
+    .filter(row =>
+      row.ref_type === refType &&
+      row.ref_id === refId &&
+      row.status === "approved" &&
+      Boolean(row.approved_by),
+    )
+    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+
+  return candidates.find(row => !logs.some(log =>
+    log.ref_type === refType &&
+    log.ref_id === refId &&
+    log.is_reprint &&
+    log.success &&
+    logContainsRequest(log, row.id),
+  )) ?? null;
 }
 
 /**
@@ -121,28 +153,38 @@ export function ReprintModal({ open, onOpenChange, refType, refId, refLabel, onC
 
     let reqRow = requestRow;
     if (!reqRow) {
-      reqRow = await insertRow<ReprintRow>("ols_reprint_requests", {
-        ref_type: refType,
-        ref_id: refId,
-        reason: packForRow(parsed, false),
-        status: "pending",
-        requested_by: actorId,
-      });
+      reqRow = await findReusableApprovedRequest(refType, refId);
+      if (!reqRow) {
+        reqRow = await insertRow<ReprintRow>("ols_reprint_requests", {
+          ref_type: refType,
+          ref_id: refId,
+          reason: packForRow(parsed, false),
+          status: "pending",
+          requested_by: actorId,
+        });
+      }
       setRequestRow(reqRow);
     }
 
+    const approvalRequestId = reqRow.status === "approved" ? reqRow.id : undefined;
+    const persistedReason = parseReason(reqRow.reason).category;
+    const effectiveReason = approvalRequestId ? persistedReason : finalReason;
     const allocation = await allocateGovernedReprint({
       refType,
       refId,
-      reason: finalReason,
+      reason: effectiveReason,
       requestId: reqRow.id,
+      approvalRequestId,
     });
 
-    if (allocation.approval_required) {
+    if (allocation.approval_required && !allocation.allowed) {
+      if (approvalRequestId) {
+        throw new Error("Core did not recognize the persisted supervisor approval; reprint remains blocked");
+      }
       const attached = await allocateGovernedReprint({
         refType,
         refId,
-        reason: finalReason,
+        reason: effectiveReason,
         requestId: reqRow.id,
         approvalRequestId: reqRow.id,
       });
@@ -155,7 +197,7 @@ export function ReprintModal({ open, onOpenChange, refType, refId, refLabel, onC
         entity_id: refId,
         details: {
           request_id: reqRow.id,
-          reason: finalReason,
+          reason: effectiveReason,
           actor_id: actorId,
           reprint_count: attached.reprint_count,
           approval_required: true,
@@ -173,7 +215,7 @@ export function ReprintModal({ open, onOpenChange, refType, refId, refLabel, onC
     }
 
     await onConfirmed({
-      reason: finalReason,
+      reason: effectiveReason,
       approver,
       watermark: DUPLICATE_WATERMARK,
       reprintCount: allocation.reprint_count,
@@ -184,15 +226,16 @@ export function ReprintModal({ open, onOpenChange, refType, refId, refLabel, onC
 
     await updateRow("ols_reprint_requests", reqRow.id, { status: "approved" });
     await audit({
-      action: "reprint_immediate",
+      action: approvalRequestId ? "reprint_approved_execution" : "reprint_immediate",
       entity_type: refType,
       entity_id: refId,
       details: {
         request_id: reqRow.id,
-        reason: finalReason,
+        reason: effectiveReason,
         actor_id: actorId,
         reprint_count: allocation.reprint_count,
         allocation_id: allocation.allocation_id,
+        approval_replayed: Boolean(approvalRequestId),
       },
     });
     toast.success("Reprint command generated", { description: refLabel });
