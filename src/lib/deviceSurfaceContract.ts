@@ -236,7 +236,6 @@ export const TRACE_ROUTE_SURFACE_CENSUS: TraceRouteSurfaceRow[] = [
 
 const TV_UA_RE = /SmartTV|Smart-TV|GoogleTV|AppleTV|Tizen|Web0S|WebOS|HbbTV|NetCast|BRAVIA|AFT[A-Z]|CrKey|TV Safari/i;
 const HANDHELD_UA_RE = /Zebra|Honeywell|Datalogic|Intermec|Symbol|MC33|TC52|TC57|CK65|Scanner/i;
-const SURFACE_OVERRIDE_KEY = "ols_device_surface";
 
 const CAPABILITY_BY_SURFACE: Record<DeviceSurface, ReadonlySet<DeviceCapability>> = {
   pc: new Set([
@@ -312,25 +311,6 @@ export function detectDeviceSurface(input: DeviceSurfaceDetectInput): DeviceSurf
   if (input.widthPx < MOBILE_BREAKPOINT_PX) return "mobile";
   if (input.coarsePointer && input.widthPx <= HANDHELD_MAX_WIDTH_PX) return "handheld";
   return "pc";
-}
-
-export function readPersistedSurfaceOverride(): DeviceSurface | null {
-  if (typeof localStorage === "undefined") return null;
-  try {
-    return parseDeviceSurfaceOverride(localStorage.getItem(SURFACE_OVERRIDE_KEY));
-  } catch {
-    return null;
-  }
-}
-
-export function persistSurfaceOverride(surface: DeviceSurface | null): void {
-  if (typeof localStorage === "undefined") return;
-  try {
-    if (surface) localStorage.setItem(SURFACE_OVERRIDE_KEY, surface);
-    else localStorage.removeItem(SURFACE_OVERRIDE_KEY);
-  } catch {
-    /* ignore quota / private mode */
-  }
 }
 
 export function censusRowForRoute(pathname: string): TraceRouteSurfaceRow | undefined {
