@@ -64,7 +64,7 @@ export default function PrintLogs() {
           refType={reprint.ref_type as ReprintRefType}
           refId={reprint.ref_id || ""}
           refLabel={`${reprint.ref_type} ${reprint.ref_id?.slice(0, 8)}`}
-          onConfirmed={async ({ reason, watermark, reprintCount, actorId, actorName }) => {
+          onConfirmed={async ({ reason, watermark, reprintCount, requestId, actorId, actorName }) => {
             const rebuilt = await rebuildGovernedPrintRequest(
               reprint.ref_type as ReprintRefType,
               reprint.ref_id || "",
@@ -75,6 +75,7 @@ export default function PrintLogs() {
               ...rebuilt,
               reprintReason: reason,
               reprintCount,
+              reprintRequestId: requestId,
               watermark,
               actorId,
               actorName,

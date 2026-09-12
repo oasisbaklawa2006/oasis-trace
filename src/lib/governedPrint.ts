@@ -6,6 +6,7 @@
  * Physical printer UAT remains downstream (Point 96 / #459).
  */
 import { listTable, insertRow } from "@/lib/data";
+import { supabase, supabaseConfigured } from "@/lib/supabase";
 import {
   validateBarcodeIdentity,
   deriveShippingQrRef,
@@ -24,6 +25,7 @@ import type {
   CartonContent,
   LabelTemplateRow,
   PrinterRow,
+  PrintLogRow,
   ProductionLabel,
   ShippingLabelRow,
 } from "@/lib/types";
@@ -40,6 +42,7 @@ export type GovernedPrintRejectionCode =
   | "template_unavailable"
   | "unsupported_transport"
   | "reprint_reason_required"
+  | "reprint_request_required"
   | "entity_not_found"
   | "payload_verification_failed";
 
@@ -74,6 +77,8 @@ export interface GovernedPrintRequest {
   isReprint?: boolean;
   reprintCount?: number;
   reprintReason?: string;
+  /** Persisted request id used to make governed reprint command generation replay-safe. */
+  reprintRequestId?: string;
   watermark?: string;
   /** Optional shipping QR — verified against deriveShippingQrRef when present. */
   qrIdentity?: string;
@@ -296,6 +301,45 @@ function packLogReason(parts: Record<string, string | number | boolean | undefin
   return extras ? `${base}|${extras}` : base;
 }
 
+function packedReasonValue(reason: string | null | undefined, key: string): string | undefined {
+  if (!reason) return undefined;
+  const prefix = `${key}=`;
+  return reason.split("|").find(part => part.startsWith(prefix))?.slice(prefix.length);
+}
+
+function logMatchesReprintRequest(log: PrintLogRow, requestId: string): boolean {
+  return packedReasonValue(log.reason ?? log.metadata?.reason, "request") === requestId;
+}
+
+async function findExistingReprintLog(req: GovernedPrintRequest): Promise<PrintLogRow | undefined> {
+  const requestId = req.reprintRequestId?.trim();
+  if (!requestId) return undefined;
+
+  if (supabaseConfigured && supabase) {
+    const { data, error } = await supabase
+      .from("ols_print_logs")
+      .select("*")
+      .eq("ref_type", req.surface)
+      .eq("ref_id", req.refId)
+      .eq("is_reprint", true)
+      .eq("success", true)
+      .limit(50);
+    if (error) {
+      throw new Error(`Cannot verify governed reprint replay state: ${error.message}`);
+    }
+    return (data as PrintLogRow[] | null)?.find(log => logMatchesReprintRequest(log, requestId));
+  }
+
+  const logs = await listTable<PrintLogRow>("ols_print_logs");
+  return logs.find(log =>
+    log.ref_type === req.surface &&
+    log.ref_id === req.refId &&
+    log.is_reprint &&
+    log.success &&
+    logMatchesReprintRequest(log, requestId)
+  );
+}
+
 async function resolveCommandLang(
   printerId?: string,
   override?: "TSPL" | "ZPL",
@@ -327,6 +371,9 @@ export async function executeGovernedPrint(req: GovernedPrintRequest): Promise<G
   if (req.isReprint && !req.reprintReason?.trim()) {
     return { ok: false, code: "reprint_reason_required", message: "Reprint requires a documented reason — cannot silently re-allocate identity" };
   }
+  if (req.isReprint && supabaseConfigured && !req.reprintRequestId?.trim()) {
+    return { ok: false, code: "reprint_request_required", message: "Live reprint requires a persisted governed request id" };
+  }
   const idCheck = validatePrintIdentity(req.surface, req.barcodeIdentity);
   if (idCheck.ok === false) return idCheck;
   const templateResult = await resolveTemplateForSurface(req.surface);
@@ -345,8 +392,24 @@ export async function executeGovernedPrint(req: GovernedPrintRequest): Promise<G
   const verification = verifyPrintEquivalence(payload, idCheck.normalized, template, { qrIdentity: req.qrIdentity });
   if (!verification.ok) return { ok: false, code: "payload_verification_failed", message: verification.message };
 
+  if (req.isReprint && req.reprintRequestId) {
+    const existing = await findExistingReprintLog(req);
+    if (existing) {
+      return {
+        ok: true,
+        jobId: packedReasonValue(existing.reason ?? existing.metadata?.reason, "print_job") ?? "existing",
+        logId: existing.id,
+        command: "",
+        copiedToClipboard: false,
+        state: "GENERATED",
+        template,
+        identity: idCheck.normalized,
+        verification,
+      };
+    }
+  }
+
   const command = langResult === "ZPL" ? generateZPL(payload) : generateTSPL(payload);
-  const copiedToClipboard = await copyToClipboardBestEffort(command);
   const jobRow = await insertRow<{ id: string }>("ols_print_jobs", {
     template_id: template.id ?? null,
     printer_id: req.printerId ?? null,
@@ -362,14 +425,17 @@ export async function executeGovernedPrint(req: GovernedPrintRequest): Promise<G
     reprint_count: req.reprintCount ?? 0,
     success: true,
     reason: packLogReason({
-      base: copiedToClipboard ? "command_generated_clipboard_copied" : "command_generated_clipboard_unavailable",
+      base: "command_generated",
       identity: idCheck.normalized,
       tpl: template.version,
       job: "GENERATED",
+      print_job: jobRow.id,
+      request: req.isReprint ? req.reprintRequestId : undefined,
       actor: req.actorName ?? req.actorId,
       reprint: req.isReprint ? req.reprintReason : undefined,
     }),
   });
+  const copiedToClipboard = await copyToClipboardBestEffort(command);
   return {
     ok: true,
     jobId: jobRow.id,

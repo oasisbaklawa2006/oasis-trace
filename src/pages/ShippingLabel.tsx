@@ -27,8 +27,6 @@ export default function ShippingLabel() {
   async function reload() {
     setCartons(await listTable<Carton>("ols_cartons"));
     setPis(await listTable<FinancePi>("ols_finance_pi"));
-    // Real FK source for carton -> PI membership — never inferred from
-    // order_ref, which multiple PIs/DPLs can share.
     setPiCartons(await listTable<FinancePiCarton>("ols_finance_pi_cartons"));
     setLabels(await listTable<ShippingLabelRow>("ols_shipping_labels", { order: "created_at" }));
   }
@@ -39,9 +37,6 @@ export default function ShippingLabel() {
     try {
       setLabelError(null);
       setIsSubmitting(true);
-      // Resolve the PI via authoritative carton membership (ols_finance_pi_cartons),
-      // never order_ref alone — an order can have multiple PIs/DPLs, and a
-      // guess here would risk generating a label against the wrong invoice.
       const memberPiIds = new Set(piCartons.filter(pc => pc.carton_id === carton.id).map(pc => pc.pi_id));
       const matchingClearedPis = pis.filter(p => memberPiIds.has(p.id) && p.status === "cleared");
       if (matchingClearedPis.length !== 1) {
@@ -62,7 +57,6 @@ export default function ShippingLabel() {
         address: "—",
         invoice_ref: pi.invoice_ref,
         qr_ref: productionNum.qrRef(shippingNo),
-        // "generated" (not "printed") — no print transport exists yet.
         status: "generated",
       }, `shipping-label:${carton.id}`);
 
@@ -165,7 +159,7 @@ export default function ShippingLabel() {
           refType="shipping"
           refId={reprint.id}
           refLabel={reprint.shipping_no}
-          onConfirmed={async ({ reason, watermark, reprintCount, actorId, actorName }) => {
+          onConfirmed={async ({ reason, watermark, reprintCount, requestId, actorId, actorName }) => {
             const result = await executeGovernedReprint({
               surface: "shipping",
               refId: reprint.id,
@@ -179,6 +173,7 @@ export default function ShippingLabel() {
               }),
               reprintReason: reason,
               reprintCount,
+              reprintRequestId: requestId,
               watermark,
               actorId,
               actorName,
