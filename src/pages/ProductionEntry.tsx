@@ -58,13 +58,14 @@ export default function ProductionEntry() {
     try {
       const governedBatch = await executeGovernedPrintBatch(pendingCommandRetries);
       const failures = governedBatch.results
-        .map((result, index) => ({ result, request: pendingCommandRetries[index] }))
+        .map((result, index) => ({ result, request: pendingCommandRetries.at(index) }))
         .filter(entry => entry.result.ok === false);
 
       if (failures.length > 0) {
-        const remaining = failures.map(f => f.request).filter(Boolean);
+        const remaining = failures.map(f => f.request).filter((request): request is PendingPrintRequest => Boolean(request));
         const identities = remaining.map(r => r.barcodeIdentity).join(", ");
-        const firstMessage = failures[0].result.ok === false ? failures[0].result.message : "Unknown command failure";
+        const firstFailure = failures.at(0);
+        const firstMessage = firstFailure?.result.ok === false ? firstFailure.result.message : "Unknown command failure";
         const message = `${failures.length} retry command${failures.length > 1 ? "s" : ""} still failed: ${identities}. ${firstMessage}`;
         setPendingCommandRetries(remaining);
         setSubmitIssue({ kind: "command", message });
@@ -179,8 +180,8 @@ export default function ProductionEntry() {
       const failures = governedBatch.results
         .map((result, index) => ({
           result,
-          identity: created[index]?.label_no ?? `item-${index + 1}`,
-          request: governedRequests[index],
+          identity: created.at(index)?.label_no ?? `item-${index + 1}`,
+          request: governedRequests.at(index),
         }))
         .filter(entry => entry.result.ok === false);
 
@@ -189,9 +190,10 @@ export default function ProductionEntry() {
 
       if (failures.length > 0) {
         const identities = failures.map(f => f.identity).join(", ");
-        const firstMessage = failures[0].result.ok === false ? failures[0].result.message : "Unknown command failure";
+        const firstFailure = failures.at(0);
+        const firstMessage = firstFailure?.result.ok === false ? firstFailure.result.message : "Unknown command failure";
         const message = `Labels saved, but ${failures.length} of ${created.length} label commands failed: ${identities}. ${firstMessage}`;
-        setPendingCommandRetries(failures.map(f => f.request).filter(Boolean));
+        setPendingCommandRetries(failures.map(f => f.request).filter((request): request is PendingPrintRequest => Boolean(request)));
         setSubmitIssue({ kind: "command", message });
         toast.error(`${failures.length} label command${failures.length > 1 ? "s" : ""} failed`, {
           description: message,
