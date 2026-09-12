@@ -6,8 +6,9 @@ export default function DeviceRouteGuard() {
   const location = useLocation();
 
   if (!access.allowed) {
-    const from = `${location.pathname}${location.search}`;
-    return <Navigate to={`/surface-blocked${location.search}`} replace state={{ from }} />;
+    // Do not propagate attacker-controlled query text into the blocked-route URL.
+    // Surface authority is derived from device signals, and guidance needs only the governed pathname.
+    return <Navigate to="/surface-blocked" replace state={{ from: location.pathname }} />;
   }
 
   return <Outlet />;
