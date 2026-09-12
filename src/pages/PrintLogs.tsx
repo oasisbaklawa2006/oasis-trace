@@ -78,12 +78,13 @@ export default function PrintLogs() {
         <ReprintModal
           open={!!reprint}
           onOpenChange={(o) => !o && setReprint(null)}
-          refType={reprint.ref_type}
+          refType={reprint.ref_type as ReprintRefType}
           refId={reprint.ref_id || ""}
           refLabel={`${reprint.ref_type} ${reprint.ref_id?.slice(0, 8)}`}
           onConfirmed={async ({ reason, watermark, reprintCount, requestId, actorId, actorName }) => {
+            const refType = reprint.ref_type as ReprintRefType;
             const rebuilt = await rebuildGovernedPrintRequest(
-              reprint.ref_type,
+              refType,
               reprint.ref_id || "",
             );
             if ("code" in rebuilt) throw new Error(rebuilt.message);
