@@ -30,7 +30,7 @@ export default function Reprints() {
   async function reload() {
     setRows(await listTable<ReprintRow>("ols_reprint_requests", { order: "created_at" }));
   }
-  useEffect(() => { reload(); }, []);
+  useEffect(() => { void reload(); }, []);
 
   const filtered = tab === "all" ? rows : rows.filter(r => r.status === tab);
   const counts = {
@@ -188,7 +188,7 @@ function DecisionDialog({ row, action, onClose, onDone }: {
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
-          <Button onClick={go} disabled={busy} className={action === "approve" ? "bg-gradient-primary text-primary-foreground" : ""} variant={action === "approve" ? "default" : "destructive"}>
+          <Button onClick={() => { void go(); }} disabled={busy} className={action === "approve" ? "bg-gradient-primary text-primary-foreground" : ""} variant={action === "approve" ? "default" : "destructive"}>
             {busy ? "Saving…" : action === "approve" ? "Approve" : "Reject"}
           </Button>
         </DialogFooter>
