@@ -265,7 +265,7 @@ export function ReprintModal({ open, onOpenChange, refType, refId, refLabel, onC
           </div>
           <div>
             <Label className="mb-1.5 block text-xs">Requested by / note (optional)</Label>
-            <Input value={approver} onChange={e => setApprover(e.target.value)} placeholder="Name or note" />
+            <Input value={approver} onChange={e => { setApprover(e.target.value); }} placeholder="Name or note" />
           </div>
 
           {estimatedNeedsApproval && demoOverrideAllowed && (
