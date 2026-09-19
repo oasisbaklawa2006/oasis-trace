@@ -37,16 +37,16 @@ export function DeviceSurfaceProvider({
   const [coarsePointer, setCoarsePointer] = useState(readCoarsePointer);
 
   useEffect(() => {
-    const onResize = () => setWidthPx(window.innerWidth);
+    const onResize = () => { setWidthPx(window.innerWidth); };
     window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
+    return () => { window.removeEventListener("resize", onResize); };
   }, []);
 
   useEffect(() => {
     const mql = window.matchMedia("(pointer: coarse)");
-    const onChange = () => setCoarsePointer(mql.matches);
+    const onChange = () => { setCoarsePointer(mql.matches); };
     mql.addEventListener("change", onChange);
-    return () => mql.removeEventListener("change", onChange);
+    return () => { mql.removeEventListener("change", onChange); };
   }, []);
 
   // Runtime device authority is derived only from actual viewport/pointer/UA signals.
