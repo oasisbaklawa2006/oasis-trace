@@ -279,7 +279,7 @@ export function ReprintModal({ open, onOpenChange, refType, refId, refLabel, onC
           )}
         </div>
         <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>Cancel</Button>
+          <Button variant="ghost" onClick={() => { onOpenChange(false); }} disabled={busy}>Cancel</Button>
           <Button onClick={() => { void confirm(); }} disabled={busy} className="bg-gradient-primary text-primary-foreground">
             {busy ? "Working…" : `Request ${DUPLICATE_WATERMARK}`}
           </Button>
