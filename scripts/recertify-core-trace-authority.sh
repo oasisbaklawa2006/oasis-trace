@@ -1,40 +1,61 @@
 #!/usr/bin/env bash
-# Production-bound recertification for Trace #37 against Core #259 / release #161.
+# Production-bound recertification for Trace #38 against Core #259 + #300.
 # Software contract suites always run; live production RPC probe is optional (needs .env).
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
-CORE_SHA="c89c538c83eeefcd116c67f06bf86869ff63b2e3"
-CORE_RELEASE=161
-CORE_RUN_ID=34188983863
+CORE_MACRO_SHA="c89c538c83eeefcd116c67f06bf86869ff63b2e3"
+CORE_MACRO_RELEASE=161
+CORE_MACRO_RUN_ID=34188983863
+CORE_REPRINT_SHA="4e8374eeaad9b9e4e89a0971c14d26b87bc184fb"
+CORE_PRODUCTION_HEAD="6867b432957c79f333dab1ab16afc512623decd9"
+CORE_PRODUCTION_HEAD_RUN_ID=35423092767
 HEAD_SHA="$(git rev-parse HEAD)"
 RUNTIME_BLOCKER=""
 
 echo "=== Trace Core authority recertification (production-bound) ==="
 echo "Trace HEAD: ${HEAD_SHA}"
-echo "Core #259 merge SHA: ${CORE_SHA}"
-echo "Core production release: #${CORE_RELEASE} (run ${CORE_RUN_ID})"
+echo "Core #259 merge SHA: ${CORE_MACRO_SHA}"
+echo "Core #300 merge SHA: ${CORE_REPRINT_SHA}"
+echo "Core production head: ${CORE_PRODUCTION_HEAD} (run ${CORE_PRODUCTION_HEAD_RUN_ID})"
 echo ""
 
-echo ">> verify Core production migration release"
-RELEASE_JSON="$(gh api "repos/oasisbaklawa2006/oasis-supabase-core/actions/runs/${CORE_RUN_ID}" \
+echo ">> verify Core macro production migration release (#259 / #161)"
+RELEASE_JSON="$(gh api "repos/oasisbaklawa2006/oasis-supabase-core/actions/runs/${CORE_MACRO_RUN_ID}" \
   --jq '{status, conclusion, head_sha}')"
 RELEASE_STATUS="$(printf '%s' "$RELEASE_JSON" | jq -r .status)"
 RELEASE_CONCLUSION="$(printf '%s' "$RELEASE_JSON" | jq -r .conclusion)"
 RELEASE_HEAD="$(printf '%s' "$RELEASE_JSON" | jq -r .head_sha)"
 if [[ "$RELEASE_STATUS" != "completed" || "$RELEASE_CONCLUSION" != "success" ]]; then
-  echo "BLOCKED: Core production release #${CORE_RELEASE} run ${CORE_RUN_ID} is ${RELEASE_STATUS}/${RELEASE_CONCLUSION}"
+  echo "BLOCKED: Core production release #${CORE_MACRO_RELEASE} run ${CORE_MACRO_RUN_ID} is ${RELEASE_STATUS}/${RELEASE_CONCLUSION}"
   exit 1
 fi
-if [[ "$RELEASE_HEAD" != "$CORE_SHA" ]]; then
-  echo "BLOCKED: Core release head ${RELEASE_HEAD} does not match expected ${CORE_SHA}"
+if [[ "$RELEASE_HEAD" != "$CORE_MACRO_SHA" ]]; then
+  echo "BLOCKED: Core macro release head ${RELEASE_HEAD} does not match expected ${CORE_MACRO_SHA}"
   exit 1
 fi
-echo "Core #${CORE_RELEASE} SUCCESS on exact merge SHA."
+echo "Core #${CORE_MACRO_RELEASE} SUCCESS on exact #259 merge SHA."
 
 echo ""
-echo ">> authority contract suites (identity, handover, audit, finalize, external_ref, scan/offline)"
+echo ">> verify latest Core production head release (includes #300 reprint approval)"
+HEAD_RELEASE_JSON="$(gh api "repos/oasisbaklawa2006/oasis-supabase-core/actions/runs/${CORE_PRODUCTION_HEAD_RUN_ID}" \
+  --jq '{status, conclusion, head_sha}')"
+HEAD_STATUS="$(printf '%s' "$HEAD_RELEASE_JSON" | jq -r .status)"
+HEAD_CONCLUSION="$(printf '%s' "$HEAD_RELEASE_JSON" | jq -r .conclusion)"
+HEAD_RELEASE_HEAD="$(printf '%s' "$HEAD_RELEASE_JSON" | jq -r .head_sha)"
+if [[ "$HEAD_STATUS" != "completed" || "$HEAD_CONCLUSION" != "success" ]]; then
+  echo "BLOCKED: Core production head run ${CORE_PRODUCTION_HEAD_RUN_ID} is ${HEAD_STATUS}/${HEAD_CONCLUSION}"
+  exit 1
+fi
+if [[ "$HEAD_RELEASE_HEAD" != "$CORE_PRODUCTION_HEAD" ]]; then
+  echo "BLOCKED: Core production head ${HEAD_RELEASE_HEAD} does not match expected ${CORE_PRODUCTION_HEAD}"
+  exit 1
+fi
+echo "Core production head SUCCESS on ${CORE_PRODUCTION_HEAD}."
+
+echo ""
+echo ">> authority contract suites (identity, handover, reprint, device surfaces, scan/offline)"
 npm test -- \
   src/lib/coreTraceAuthorityContract.test.ts \
   src/lib/coreTraceAuthorityNegative.test.ts \
@@ -50,7 +71,12 @@ npm test -- \
   src/lib/centralTraceContract.test.ts \
   src/lib/centralSubmit.test.ts \
   src/lib/scanContract.test.ts \
-  src/lib/legacyGateHandoff.test.ts
+  src/lib/legacyGateHandoff.test.ts \
+  src/lib/governedPrint.test.ts \
+  src/lib/atomicGovernedReprint.test.ts \
+  src/lib/reprintPolicyLiveApproval.test.ts \
+  src/lib/deviceSurfaceContract.test.ts \
+  src/lib/deviceSurfaceRuntimePolicy.test.ts
 
 echo ""
 echo ">> full unit/integration suite"
@@ -90,6 +116,7 @@ if [[ -n "$SUPABASE_URL" && -n "$SUPABASE_KEY" ]]; then
       'trace_insert_handover_audit_v1',
       'trace_finalize_carton_v1',
       'trace_reconcile_external_refs_v1',
+      'trace_approve_reprint_request_v1',
     ];
     const sb = createClient(process.env.VITE_SUPABASE_URL, process.env.VITE_SUPABASE_ANON_KEY);
     const missing = [];
@@ -104,7 +131,7 @@ if [[ -n "$SUPABASE_URL" && -n "$SUPABASE_KEY" ]]; then
       console.error('Production RPC probe missing:', missing.join(', '));
       process.exit(2);
     }
-    console.log('Production RPC probe: all Core #259 surfaces reachable (auth/validation errors expected).');
+    console.log('Production RPC probe: all Core #259/#300 surfaces reachable (auth/validation errors expected).');
   " || RUNTIME_BLOCKER="production_rpc_probe_failed"
 else
   RUNTIME_BLOCKER="production_runtime_verification_requires_VITE_SUPABASE_URL_and_VITE_SUPABASE_ANON_KEY"
@@ -113,12 +140,13 @@ fi
 
 echo ""
 echo "=== Recertification summary (Trace HEAD ${HEAD_SHA}) ==="
-echo "Core migration: DEPLOYED (#${CORE_RELEASE} SUCCESS on ${CORE_SHA})"
+echo "Core macro migration (#259): DEPLOYED (#${CORE_MACRO_RELEASE} SUCCESS on ${CORE_MACRO_SHA})"
+echo "Core reprint approval (#300): DEPLOYED via production head ${CORE_PRODUCTION_HEAD}"
 echo "Software contract suites: PASS"
 if [[ -n "$RUNTIME_BLOCKER" ]]; then
   echo "Production runtime semantic verification: BLOCKED — ${RUNTIME_BLOCKER}"
-  echo "Trace #37 remains DRAFT. Physical scanner/printer/TV/custody evidence: unclaimed (Leap13 / #462)."
+  echo "Physical scanner/printer/TV/custody evidence: PHYSICAL_CERTIFICATION_REQUIRED (Leap13 / #462)."
   exit 0
 fi
 echo "Production runtime semantic verification: PASS (RPC presence probe)"
-echo "Trace #37 remains DRAFT until review-clean. Physical evidence: unclaimed (Leap13 / #462)."
+echo "Physical scanner/printer/TV/custody evidence: PHYSICAL_CERTIFICATION_REQUIRED (Leap13 / #462)."
