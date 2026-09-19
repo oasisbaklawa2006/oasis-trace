@@ -55,6 +55,15 @@ fi
 echo "Core production head SUCCESS on ${CORE_PRODUCTION_HEAD}."
 
 echo ""
+echo ">> verify Core production head contains #300 reprint approval commit"
+COMPARE_STATUS="$(gh api "repos/oasisbaklawa2006/oasis-supabase-core/compare/${CORE_REPRINT_SHA}...${CORE_PRODUCTION_HEAD}" --jq '.status')"
+if [[ "$COMPARE_STATUS" != "ahead" && "$COMPARE_STATUS" != "identical" ]]; then
+  echo "BLOCKED: Core production head ${CORE_PRODUCTION_HEAD} does not contain #300 merge ${CORE_REPRINT_SHA} (compare status: ${COMPARE_STATUS})"
+  exit 1
+fi
+echo "Core production head contains #300 reprint approval (${COMPARE_STATUS})."
+
+echo ""
 echo ">> authority contract suites (identity, handover, reprint, device surfaces, scan/offline)"
 npm test -- \
   src/lib/coreTraceAuthorityContract.test.ts \
@@ -116,6 +125,9 @@ if [[ -n "$SUPABASE_URL" && -n "$SUPABASE_KEY" ]]; then
       'trace_insert_handover_audit_v1',
       'trace_finalize_carton_v1',
       'trace_reconcile_external_refs_v1',
+      'trace_add_carton_content_v1',
+      'trace_allocate_carton_index_v1',
+      'trace_legacy_gate_clear_v1',
       'trace_approve_reprint_request_v1',
     ];
     const sb = createClient(process.env.VITE_SUPABASE_URL, process.env.VITE_SUPABASE_ANON_KEY);
