@@ -193,7 +193,8 @@ export function ReprintModal({ open, onOpenChange, refType, refId, refLabel, onC
       actorName,
     });
 
-    await updateRow("ols_reprint_requests", reqRow.id, { status: "approved" });
+    // Live approval/request state is Core-owned. Do not issue a client-side
+    // UPDATE after the atomic command has already been durably recorded.
     await audit({
       action: approvalRequestId ? "reprint_approved_execution" : "reprint_immediate",
       entity_type: refType,
@@ -279,7 +280,7 @@ export function ReprintModal({ open, onOpenChange, refType, refId, refLabel, onC
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>Cancel</Button>
-          <Button onClick={confirm} disabled={busy} className="bg-gradient-primary text-primary-foreground">
+          <Button onClick={() => { void confirm(); }} disabled={busy} className="bg-gradient-primary text-primary-foreground">
             {busy ? "Working…" : `Request ${DUPLICATE_WATERMARK}`}
           </Button>
         </DialogFooter>
