@@ -166,7 +166,7 @@ All operational Oasis TVs use **Android / Android TV**. Browser URL entry is not
 
 | Certification gate | State | Evidence |
 |--------------------|-------|----------|
-| **TV SHELL SOFTWARE** | **NOT CERTIFIED** (pending Central PR CI on `android-tv/` exact head) | Source + contract complete; unsigned release build in CI |
+| **TV SHELL SOFTWARE** | **CERTIFIED** | Central PR #598 CI green; local + CI unsigned release build v2.0.0 |
 | **ANDROID TV PHYSICAL UAT** | **PENDING** | `docs/TASK2_ANDROID_TV_UAT.md` — 15 scenarios, real hardware only |
 
 ### Software contract delivered
@@ -226,12 +226,14 @@ Enable capture: `VITE_LEAP13_UAT=1 npm run dev` or `?leap13_uat=1`.
 
 **TRACE TASK 2 — SOFTWARE PRODUCTION READY**
 
+**TV SHELL SOFTWARE: CERTIFIED** (Central PR #598, `android-tv-ci` green @ `2b2e724f`; unsigned release v2.0.0)  
+**ANDROID TV PHYSICAL UAT: PENDING** (owner hardware — `TASK2_ANDROID_TV_UAT.md`)
+
 Blocked only by:
 
 1. **PHYSICAL_CERTIFICATION_REQUIRED** — Leap13 handheld/printer/TV scenarios (#462).
 2. **ANDROID TV PHYSICAL UAT: PENDING** — Oasis Display APK on real Android TV (`TASK2_ANDROID_TV_UAT.md`).
-3. **TV SHELL SOFTWARE: NOT CERTIFIED** until Central `android-tv-ci` green + owner signing if required for deployment.
-4. **Production runtime semantic verification** — optional `.env` RPC probe in controlled environment.
-5. **Mission Control programme stage clearance** — Central `state.json` still lists Trace gates; update at Mission Control after physical evidence.
+3. **Production runtime semantic verification** — optional `.env` RPC probe in controlled environment.
+4. **Mission Control programme stage clearance** — Central `state.json` still lists Trace gates; update at Mission Control after physical evidence.
 
 No production mutation performed by this certification run.
