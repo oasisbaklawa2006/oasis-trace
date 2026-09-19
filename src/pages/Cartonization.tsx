@@ -69,7 +69,7 @@ export default function Cartonization() {
       ? resolveCartonBarcodeDisplay(orderRef, undefined, supportsCentralBarcode(orderRef) ? { central_barcode: undefined } : undefined)
       : null;
 
-  useEffect(() => { (async () => {
+  useEffect(() => { void (async () => {
     setOrders(await listTable<OrderCache>("ols_orders_cache"));
     const lbls = await listTable<ProductionLabel>("ols_production_labels");
     setLabels(lbls);
@@ -320,11 +320,11 @@ export default function Cartonization() {
               </Select>
             </div>
             {!carton ? (
-              <Button onClick={startCarton} className="bg-gradient-primary text-primary-foreground"><PackagePlus size={16} className="mr-1.5" /> Start Carton</Button>
+              <Button onClick={() => { void startCarton(); }} className="bg-gradient-primary text-primary-foreground"><PackagePlus size={16} className="mr-1.5" /> Start Carton</Button>
             ) : (
               <Button
                 variant="outline"
-                onClick={finalizeCarton}
+                onClick={() => { void finalizeCarton(); }}
                 disabled={!can("print_command") || finalizing}
                 title={!can("print_command") ? capabilityGuidance("print_command") : undefined}
               >
@@ -364,7 +364,7 @@ export default function Cartonization() {
                       onKeyDown={e => e.key === "Enter" && verifyCartonIdentity()}
                       className="font-mono"
                     />
-                    <Button onClick={verifyCartonIdentity} variant="secondary"><ScanBarcode size={16} /></Button>
+                    <Button onClick={() => { void verifyCartonIdentity(); }} variant="secondary"><ScanBarcode size={16} /></Button>
                   </div>
                   <CentralPayloadPreview
                     title="Central carton identity payload"
@@ -395,7 +395,7 @@ export default function Cartonization() {
                   className="font-mono"
                   autoFocus={!supportsCentralBarcode(carton.order_ref)}
                 />
-                <Button onClick={scanLabel}><ScanBarcode size={16} /></Button>
+                <Button onClick={() => { void scanLabel(); }}><ScanBarcode size={16} /></Button>
               </div>
 
               <div className="mt-4">
