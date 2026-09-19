@@ -79,9 +79,7 @@ export default function ProductionEntry() {
         .filter(entry => entry.result.ok === false);
 
       if (failures.length > 0) {
-        const remaining = failures
-          .map(f => f.request)
-          .filter((request): request is (typeof retryRequests)[number] => Boolean(request));
+        const remaining = failures.flatMap(f => f.request ? [f.request] : []);
         const identities = remaining.map(r => r.barcodeIdentity).join(", ");
         const firstFailure = failures.at(0);
         const firstMessage = firstFailure?.result.ok === false ? firstFailure.result.message : "Unknown command failure";
