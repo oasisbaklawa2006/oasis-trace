@@ -25,7 +25,7 @@ export interface GeneratedLabelResult {
 /** Generates a TSPL command for a label and best-effort copies it to the clipboard. */
 export async function generateLabelCommand(payload: LabelPayload): Promise<GeneratedLabelResult> {
   const command = generateTSPL(payload);
-  const copiedToClipboard = await copyToClipboard(command);
+  const copiedToClipboard = await copyToClipboardBestEffort(command);
   return { command, copiedToClipboard };
 }
 
@@ -44,11 +44,12 @@ export interface GeneratedLabelBatchResult {
  */
 export async function generateLabelCommandBatch(payloads: LabelPayload[]): Promise<GeneratedLabelBatchResult> {
   const commands = payloads.map(generateTSPL);
-  const copiedToClipboard = await copyToClipboard(commands.join("\n\n"));
+  const copiedToClipboard = await copyToClipboardBestEffort(commands.join("\n\n"));
   return { commands, copiedToClipboard };
 }
 
-async function copyToClipboard(text: string): Promise<boolean> {
+/** Best-effort clipboard write used by governed print paths; generation remains valid if unavailable. */
+export async function copyToClipboardBestEffort(text: string): Promise<boolean> {
   try {
     if (typeof navigator !== "undefined" && navigator.clipboard) {
       await navigator.clipboard.writeText(text);
