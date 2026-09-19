@@ -344,26 +344,39 @@ async function resolveCommandLang(
   printerId?: string,
   override?: "TSPL" | "ZPL",
 ): Promise<"TSPL" | "ZPL" | GovernedPrintFailure> {
-  if (override) return override;
-  if (!printerId) return "TSPL";
-  const printers = await listTable<PrinterRow>("ols_printers");
-  const printer = printers.find(p => p.id === printerId);
-  if (!printer) {
-    return {
-      ok: false,
-      code: "unsupported_transport",
-      message: "Selected printer is not registered; governed command generation was blocked",
-    };
+  let printerLang: "TSPL" | "ZPL" | undefined;
+  if (printerId) {
+    const printers = await listTable<PrinterRow>("ols_printers");
+    const printer = printers.find(p => p.id === printerId);
+    if (!printer) {
+      return {
+        ok: false,
+        code: "unsupported_transport",
+        message: "Selected printer is not registered; governed command generation was blocked",
+      };
+    }
+    if (printer.command_lang === "BROWSER") {
+      return {
+        ok: false,
+        code: "unsupported_transport",
+        message: "Browser-print printers cannot be used for governed thermal label commands",
+      };
+    }
+    printerLang = printer.command_lang === "ZPL" ? "ZPL" : "TSPL";
   }
-  if (printer.command_lang === "BROWSER") {
-    return {
-      ok: false,
-      code: "unsupported_transport",
-      message: "Browser-print printers cannot be used for governed thermal label commands",
-    };
+
+  if (override) {
+    if (printerLang && printerLang !== override) {
+      return {
+        ok: false,
+        code: "unsupported_transport",
+        message: `Requested command language ${override} does not match registered printer language ${printerLang}`,
+      };
+    }
+    return override;
   }
-  if (printer.command_lang === "ZPL") return "ZPL";
-  return "TSPL";
+
+  return printerLang ?? "TSPL";
 }
 
 /** Fail-closed governed print — generates command, persists job+log, never claims physical print. */
@@ -462,13 +475,16 @@ export async function executeGovernedPrintBatch(
 ): Promise<{ results: GovernedPrintResult[]; copiedToClipboard: boolean }> {
   const results: GovernedPrintResult[] = [];
   const commands: string[] = [];
+  const templateRows = await listTable<LabelTemplateRow>("ols_label_templates");
 
   for (const item of items) {
     const idCheck = validatePrintIdentity(item.surface, item.barcodeIdentity);
     if (idCheck.ok === false) { results.push(idCheck); continue; }
-    const templateResult = await resolveTemplateForSurface(item.surface);
+    const templateResult = await resolveTemplateForSurface(item.surface, templateRows);
     if ("ok" in templateResult && templateResult.ok === false) { results.push(templateResult); continue; }
     const template = templateResult as ResolvedTemplate;
+    const langResult = await resolveCommandLang(item.printerId, item.commandLang);
+    if (typeof langResult !== "string") { results.push(langResult); continue; }
     const payload: LabelPayload = {
       ...item.payload,
       widthMm: template.widthMm,
@@ -480,17 +496,19 @@ export async function executeGovernedPrintBatch(
       results.push({ ok: false, code: "payload_verification_failed", message: verification.message });
       continue;
     }
-    const command = generateTSPL(payload);
+    const command = langResult === "ZPL" ? generateZPL(payload) : generateTSPL(payload);
     commands.push(command);
     const jobRow = await insertRow<{ id: string }>("ols_print_jobs", {
       template_id: template.id ?? null,
-      command_lang: "TSPL",
+      printer_id: item.printerId ?? null,
+      command_lang: langResult,
       command_payload: command,
       status: "generated",
     });
     const logRow = await insertRow<{ id: string }>("ols_print_logs", {
       ref_type: item.surface,
       ref_id: item.refId,
+      printer_id: item.printerId ?? null,
       is_reprint: false,
       reprint_count: 0,
       success: true,
