@@ -224,9 +224,62 @@ describe("executeGovernedPrint", () => {
     if (result.ok === false) expect(result.code).toBe("unsupported_transport");
     expect(inserted).toHaveLength(0);
   });
+
+  it("cannot bypass an unknown printer with a command-language override", async () => {
+    const result = await executeGovernedPrint({
+      surface: "production_label",
+      refId: "lbl-1",
+      barcodeIdentity: "PL-20260906-0001",
+      printerId: "missing-printer",
+      commandLang: "ZPL",
+      payload: buildProductionLabelPayload({
+        batchNo: "B", mfgDate: "2026-01-01", shelfLifeDays: 1,
+        netWeight: 1, grossWeight: 1, labelNo: "PL-20260906-0001",
+      }),
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok === false) expect(result.code).toBe("unsupported_transport");
+    expect(inserted).toHaveLength(0);
+  });
+
+  it("rejects a command-language override that conflicts with the registered printer", async () => {
+    const result = await executeGovernedPrint({
+      surface: "production_label",
+      refId: "lbl-1",
+      barcodeIdentity: "PL-20260906-0001",
+      printerId: "p1",
+      commandLang: "ZPL",
+      payload: buildProductionLabelPayload({
+        batchNo: "B", mfgDate: "2026-01-01", shelfLifeDays: 1,
+        netWeight: 1, grossWeight: 1, labelNo: "PL-20260906-0001",
+      }),
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok === false) expect(result.code).toBe("unsupported_transport");
+    expect(inserted).toHaveLength(0);
+  });
 });
 
 describe("executeGovernedPrintBatch", () => {
+  it("fails a batch item when its printer and requested language conflict", async () => {
+    const result = await executeGovernedPrintBatch([{
+      surface: "production_label",
+      refId: "lbl-1",
+      barcodeIdentity: "PL-20260906-0001",
+      printerId: "p1",
+      commandLang: "ZPL",
+      payload: buildProductionLabelPayload({
+        batchNo: "BAT-1", mfgDate: "2026-09-06", shelfLifeDays: 90,
+        netWeight: 5, grossWeight: 5.25, labelNo: "PL-20260906-0001",
+      }),
+    }]);
+    expect(result.results[0]?.ok).toBe(false);
+    if (result.results[0]?.ok === false) {
+      expect(result.results[0].code).toBe("unsupported_transport");
+    }
+    expect(inserted).toHaveLength(0);
+  });
+
   it("preserves actor attribution in batch print logs", async () => {
     const result = await executeGovernedPrintBatch([{
       surface: "production_label",
