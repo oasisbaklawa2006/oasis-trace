@@ -14,6 +14,8 @@ import { executeGovernedPrint, NO_PHYSICAL_PRINT_NOTE } from "@/lib/governedPrin
 import { executeAtomicGovernedReprint } from "@/lib/atomicGovernedReprint";
 import { buildShippingLabelPayload } from "@/lib/labelPayloads";
 import { traceMutations } from "@/lib/traceMutations";
+import { useOlsSession } from "@/hooks/useOlsSession";
+import { supabaseConfigured } from "@/lib/supabase";
 
 export default function ShippingLabel() {
   const [cartons, setCartons] = useState<Carton[]>([]);
@@ -23,8 +25,9 @@ export default function ShippingLabel() {
   const [reprint, setReprint] = useState<ShippingLabelRow | null>(null);
   const [labelError, setLabelError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const { session } = useOlsSession();
 
-  useEffect(() => { reload(); }, []);
+  useEffect(() => { void reload(); }, []);
   async function reload() {
     setCartons(await listTable<Carton>("ols_cartons"));
     setPis(await listTable<FinancePi>("ols_finance_pi"));
@@ -38,6 +41,11 @@ export default function ShippingLabel() {
     try {
       setLabelError(null);
       setIsSubmitting(true);
+      const actorId = session?.user?.id;
+      const actorName = session?.user?.email ?? actorId;
+      if (supabaseConfigured && !actorId) {
+        throw new Error("Authenticated shipping-label actor is required in live mode");
+      }
       const memberPiIds = new Set(piCartons.filter(pc => pc.carton_id === carton.id).map(pc => pc.pi_id));
       const matchingClearedPis = pis.filter(p => memberPiIds.has(p.id) && p.status === "cleared");
       if (matchingClearedPis.length !== 1) {
@@ -72,6 +80,8 @@ export default function ShippingLabel() {
           shippingNo: lbl.shipping_no,
           qrRef: lbl.qr_ref,
         }),
+        actorId,
+        actorName,
       });
       if (printResult.ok === false) throw new Error(printResult.message);
 
@@ -108,7 +118,7 @@ export default function ShippingLabel() {
                     <p className="font-mono text-xs">{c.carton_no}</p>
                     <p className="text-xs text-muted-foreground">{c.order_ref} · {c.customer_name}</p>
                   </div>
-                  <Button size="sm" onClick={() => generate(c)} disabled={isSubmitting} className="bg-gradient-primary text-primary-foreground"><Tag size={14} className="mr-1" /> Generate</Button>
+                  <Button size="sm" onClick={() => { void generate(c); }} disabled={isSubmitting} className="bg-gradient-primary text-primary-foreground"><Tag size={14} className="mr-1" /> Generate</Button>
                 </li>
               ))}
             </ul>
