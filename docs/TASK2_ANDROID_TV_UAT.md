@@ -22,7 +22,7 @@ Mark **PASS** only with attached evidence. Browser testing does not satisfy this
 
 | # | Scenario | Steps | Expected behaviour | PASS criteria | Evidence |
 |---|----------|-------|-------------------|---------------|----------|
-| 1 | Install APK | Sideload release APK on Android TV | App installs, launches, shows Oasis Display enrollment | No install/launch crash | Photo of launcher + first screen |
+| 1 | Install APK | Sideload an installable UAT APK signed with a controlled debug/CI test key on Android TV | App installs, launches, shows Oasis Display enrollment | Package signature is accepted by Android; no install/launch crash | Photo of package install/launcher + first screen |
 | 2 | First launch enrollment | Launch without prior assignment | Shows device ID, enrollment code, QR; no URL prompt | Enrollment visible; no browser chrome | Photo/video |
 | 3 | Admin assignment | Display Management → enter code → select surface → copy ADB command → apply | TV receives assignment, exits enrollment | Assigned surface loads full-screen | Video: enroll → assign → display |
 | 4 | Assigned screen launch | Open RGS or Trace Gate surface | Correct read-only dashboard renders legibly at TV distance | Content readable; auto-refresh works | Photo at ≥2m distance |
@@ -53,8 +53,12 @@ Mark **PASS** only with attached evidence. Browser testing does not satisfy this
 
 ---
 
-## Signing gate
+## Signing gates
 
-CI produces **unsigned** release APK only. Production distribution requires owner keystore signing per `Oasis-Baklawa-Central/android-tv/RELEASE_SIGNING.md`.
+The CI-generated **unsigned** release APK is a build-only artifact and is **not** sufficient for Scenario 1 because Android TV will not install an unsigned package.
 
-**ANDROID TV PHYSICAL UAT: PENDING** until this matrix is executed on real hardware with signed APK if required by deployment policy.
+Before physical UAT, produce a separate installable UAT APK signed with a controlled debug/CI test key. The UAT key must not be the owner production keystore and must not be committed to the repository. Record the signing method, APK SHA-256, package/version, and installation result as UAT evidence.
+
+Owner-keystore signing is reserved for **production distribution** and remains a separate release gate documented in `Oasis-Baklawa-Central/android-tv/RELEASE_SIGNING.md`.
+
+**ANDROID TV PHYSICAL UAT: PENDING** until this matrix is executed on real Android TV hardware using the installable controlled-test-signed UAT APK. Production distribution remains pending owner-keystore signing.
