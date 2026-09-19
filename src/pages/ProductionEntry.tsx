@@ -18,12 +18,15 @@ import { errorMessage } from "@/lib/utils";
 import { executeGovernedPrintBatch, NO_PHYSICAL_PRINT_NOTE } from "@/lib/governedPrint";
 import { buildProductionLabelPayload } from "@/lib/labelPayloads";
 import { computeBestBefore } from "@/lib/dateMath";
+import { useOlsSession } from "@/hooks/useOlsSession";
+import { supabaseConfigured } from "@/lib/supabase";
 
 type PendingPrintRequest = Parameters<typeof executeGovernedPrintBatch>[0][number];
 type SubmitIssue = { kind: "save" | "command"; message: string };
 
 export default function ProductionEntry() {
   const nav = useNavigate();
+  const { session } = useOlsSession();
   const [departments, setDepartments] = useState<Department[]>([]);
   const [products, setProducts] = useState<ProductCache[]>([]);
   const [recent, setRecent] = useState<ProductionLabel[]>([]);
@@ -40,7 +43,7 @@ export default function ProductionEntry() {
   const [pendingCommandRetries, setPendingCommandRetries] = useState<PendingPrintRequest[]>([]);
 
   useEffect(() => {
-    (async () => {
+    void (async () => {
       setDepartments(await listTable<Department>("ols_departments"));
       setProducts(await listTable<ProductCache>("ols_products_cache"));
       setRecent(await listTable<ProductionLabel>("ols_production_labels", { order: "created_at", limit: 8 }));
@@ -51,14 +54,28 @@ export default function ProductionEntry() {
 
   const update = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
+  function authenticatedPrintActor() {
+    const actorId = session?.user?.id;
+    const sessionName = session?.user?.email ?? actorId;
+    if (supabaseConfigured && !actorId) {
+      throw new Error("Authenticated production actor is required in live mode");
+    }
+    return {
+      actorId: actorId || undefined,
+      actorName: supabaseConfigured ? sessionName : (form.operator_name.trim() || sessionName || undefined),
+    };
+  }
+
   async function retryFailedCommands() {
     if (pendingCommandRetries.length === 0) return;
     setIsSubmitting(true);
     setSubmitIssue(null);
     try {
-      const governedBatch = await executeGovernedPrintBatch(pendingCommandRetries);
+      const actor = authenticatedPrintActor();
+      const retryRequests = pendingCommandRetries.map(request => ({ ...request, ...actor }));
+      const governedBatch = await executeGovernedPrintBatch(retryRequests);
       const failures = governedBatch.results
-        .map((result, index) => ({ result, request: pendingCommandRetries.at(index) }))
+        .map((result, index) => ({ result, request: retryRequests.at(index) }))
         .filter(entry => entry.result.ok === false);
 
       if (failures.length > 0) {
@@ -123,6 +140,7 @@ export default function ProductionEntry() {
     setIsSubmitting(true);
     setSubmitIssue(null);
     try {
+      const actor = authenticatedPrintActor();
       const batchInput = {
         product_id: form.product_id,
         department_id: form.department_id,
@@ -143,7 +161,7 @@ export default function ProductionEntry() {
         mfg_date: form.mfg_date,
         best_before: bestBefore,
         qc_status: form.qc_status,
-        operator_name: form.operator_name,
+        operator_name: supabaseConfigured ? (actor.actorName ?? "") : form.operator_name,
         status: "active",
         metadata: {
           product_name: product?.name,
@@ -173,7 +191,8 @@ export default function ProductionEntry() {
           grossWeight: form.gross_weight,
           labelNo: label.label_no,
         }),
-        actorName: form.operator_name || undefined,
+        actorId: actor.actorId,
+        actorName: actor.actorName,
       }));
 
       const governedBatch = await executeGovernedPrintBatch(governedRequests);
@@ -267,7 +286,9 @@ export default function ProductionEntry() {
           </div>
           <div className="mt-5 flex flex-wrap gap-2">
             <Button
-              onClick={pendingCommandRetries.length > 0 ? retryFailedCommands : generate}
+              onClick={() => {
+                void (pendingCommandRetries.length > 0 ? retryFailedCommands() : generate());
+              }}
               disabled={isSubmitting}
               className="bg-gradient-primary text-primary-foreground shadow-elevated"
             >
