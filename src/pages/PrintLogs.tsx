@@ -24,7 +24,7 @@ export default function PrintLogs() {
   const [logs, setLogs] = useState<PrintLogRow[]>([]);
   const [reprint, setReprint] = useState<PrintLogRow | null>(null);
 
-  useEffect(() => { reload(); }, []);
+  useEffect(() => { void reload(); }, []);
   async function reload() { setLogs(await listTable<PrintLogRow>("ols_print_logs", { order: "created_at" })); }
 
   return (
