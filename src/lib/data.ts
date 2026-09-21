@@ -113,6 +113,34 @@ export async function listTable<T = unknown>(table: string, opts?: { order?: str
   return demo.list<T>(table, opts);
 }
 
+/**
+ * Strict authoritative read for flows where demo fallback could create a
+ * false-green result after a governed live mutation. Never falls back to demo.
+ */
+export async function listTableStrict<T = unknown>(
+  table: string,
+  opts?: { order?: string; limit?: number },
+): Promise<T[]> {
+  if (!supabaseConfigured || !supabase) {
+    throw new Error("Authoritative Trace read requires a configured Supabase backend.");
+  }
+  try {
+    const data = await withRetry(async () => {
+      let q = supabase!.from(table).select("*");
+      if (opts?.order) q = q.order(opts.order, { ascending: false });
+      if (opts?.limit) q = q.limit(opts.limit);
+      const { data, error } = await withTimeout(q);
+      if (error) throw error;
+      return data as T[];
+    });
+    setMode("live");
+    return data;
+  } catch (e: unknown) {
+    console.error(`[ols] strict read ${table} failed in live mode:`, errorMessage(e));
+    throw new Error(`Cannot read authoritative database state: ${errorMessage(e)}.`);
+  }
+}
+
 export type CountFilter =
   | { column: string; op: "eq"; value: unknown }
   | { column: string; op: "neq"; value: unknown }
