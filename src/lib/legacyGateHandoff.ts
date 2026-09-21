@@ -31,6 +31,18 @@ async function recordGateScan(
   decision: LegacyGateDecision,
 ): Promise<void> {
   const { result: res, label: lbl } = decision;
+
+  if (supabaseConfigured) {
+    await invokeTraceMutation("trace_record_gate_scan_v1", {
+      p_qr_ref: ref,
+      p_shipping_label_id: lbl?.id ?? null,
+      p_result: res.kind,
+      p_reason: res.reason ?? null,
+      p_idempotency_key: `legacy-gate-scan:${ref}:${res.kind}`,
+    });
+    return;
+  }
+
   await insertRow("ols_gate_scans", {
     qr_ref: ref,
     shipping_label_id: lbl?.id,
