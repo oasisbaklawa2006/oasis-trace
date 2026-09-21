@@ -128,6 +128,7 @@ if [[ -n "$SUPABASE_URL" && -n "$SUPABASE_KEY" ]]; then
       'trace_add_carton_content_v1',
       'trace_allocate_carton_index_v1',
       'trace_legacy_gate_clear_v1',
+      'trace_record_gate_scan_v1',
       'trace_approve_reprint_request_v1',
     ];
     const sb = createClient(process.env.VITE_SUPABASE_URL, process.env.VITE_SUPABASE_ANON_KEY);
