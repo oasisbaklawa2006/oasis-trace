@@ -98,15 +98,13 @@ export async function reconcileExternalRefs(): Promise<ExternalRefSyncResult> {
       bindings?: Array<{ cache_id: string; external_ref: string }>;
       applied?: number;
     }>("trace_reconcile_external_refs_v1", {});
-    let applied = 0;
-    for (const b of result.bindings ?? []) {
-      await updateRow("ols_orders_cache", b.cache_id, { external_ref: b.external_ref });
-      applied++;
-    }
+    // Core owns the live mutation. Re-read the authoritative cache after the
+    // RPC rather than attempting a second browser-side UPDATE that RLS denies.
+    const applied = result.applied ?? result.bindings?.length ?? 0;
     const refreshed = await listTable<OrderCache>("ols_orders_cache", { order: "order_number" });
     const report = analyzeExternalRefBindings(refreshed);
-    const { ok, message } = formatReconcileResult(report, result.applied ?? applied);
-    return { ok, report, applied: result.applied ?? applied, message };
+    const { ok, message } = formatReconcileResult(report, applied);
+    return { ok, report, applied, message };
   }
 
   let applied = 0;
