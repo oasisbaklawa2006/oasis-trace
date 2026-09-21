@@ -6,7 +6,7 @@
  * Live mode invokes governed Core trace_reconcile_external_refs_v1 (Core #259);
  * demo mode applies stable software-validation bindings only.
  */
-import { invokeTraceMutation, listTable, updateRow } from "@/lib/data";
+import { invokeTraceMutation, listTable, listTableStrict, updateRow } from "@/lib/data";
 import { resolveCentralOrderId, type CentralOrderRef } from "@/lib/centralTraceContract";
 import { supabaseConfigured } from "@/lib/supabase";
 import type { OrderCache } from "@/lib/types";
@@ -101,7 +101,7 @@ export async function reconcileExternalRefs(): Promise<ExternalRefSyncResult> {
     // Core owns the live mutation. Re-read the authoritative cache after the
     // RPC rather than attempting a second browser-side UPDATE that RLS denies.
     const applied = result.applied ?? result.bindings?.length ?? 0;
-    const refreshed = await listTable<OrderCache>("ols_orders_cache", { order: "order_number" });
+    const refreshed = await listTableStrict<OrderCache>("ols_orders_cache", { order: "order_number" });
     const report = analyzeExternalRefBindings(refreshed);
     const { ok, message } = formatReconcileResult(report, applied);
     return { ok, report, applied, message };
