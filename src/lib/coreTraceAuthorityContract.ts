@@ -54,6 +54,7 @@ export const CORE_TRACE_AUTHORITY_RPCS = {
   addCartonContent: "trace_add_carton_content_v1",
   allocateCartonIndex: "trace_allocate_carton_index_v1",
   legacyGateClear: "trace_legacy_gate_clear_v1",
+  recordGateScan: "trace_record_gate_scan_v1",
   approveReprintRequest: "trace_approve_reprint_request_v1",
 } as const;
 
@@ -101,7 +102,8 @@ export const CORE_TRACE_AUTHORITY_CERTIFICATION: {
   note:
     "Core #259 deployed via Production Migration Release #161 on c89c538. "
     + "Core #300 reprint approval deployed via production head 6867b432 (run 35423092767). "
-    + "Trace #38 merged on main. Physical scanner/printer/TV/custody evidence remains separate (Leap13 / #462).",
+    + "Trace #38 merged on main. Task 2 runtime gap repair is tracked by Core PR #342. "
+    + "Physical scanner/printer/TV/custody evidence remains separate (Leap13 / #462).",
 };
 
 /** Contract test files exercised by scripts/recertify-core-trace-authority.sh */
