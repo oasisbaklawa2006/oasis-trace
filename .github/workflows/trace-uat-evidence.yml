@@ -1,0 +1,79 @@
+name: Trace UAT evidence harness
+
+on:
+  workflow_dispatch:
+    inputs:
+      trace_uat_base_url:
+        description: "Governed preview or production-readonly Trace URL (no trailing slash)"
+        required: true
+        type: string
+      trace_uat_expected_sha:
+        description: "Expected deployment git SHA (fail closed on mismatch)"
+        required: true
+        type: string
+  pull_request:
+    branches: [main]
+    paths:
+      - "e2e/**"
+      - "src/lib/traceUatEvidenceContract.ts"
+      - "playwright.config.ts"
+      - ".github/workflows/trace-uat-evidence.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trace-uat-evidence-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  local-preview-evidence:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:uat-evidence
+      - name: Upload UAT evidence artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trace-uat-evidence-pr
+          path: |
+            artifacts/trace-uat-evidence/**
+            playwright-report/**
+            test-results/**
+
+  governed-deployment-evidence:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Run governed UAT evidence against deployment URL
+        env:
+          TRACE_UAT_BASE_URL: ${{ inputs.trace_uat_base_url }}
+          TRACE_UAT_EXPECTED_SHA: ${{ inputs.trace_uat_expected_sha }}
+          TRACE_UAT_REPO_SHA: ${{ github.sha }}
+        run: npm run test:uat-evidence
+      - name: Upload UAT evidence artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trace-uat-evidence-dispatch
+          path: |
+            artifacts/trace-uat-evidence/**
+            playwright-report/**
+            test-results/**

@@ -25,3 +25,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Playwright / UAT evidence harness outputs
+/test-results/
+/playwright-report/
+/artifacts/trace-uat-evidence/
