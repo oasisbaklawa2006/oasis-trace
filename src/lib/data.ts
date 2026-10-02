@@ -1,23 +1,22 @@
 // Data layer for OASIS LABEL STUDIO.
-// Reads: tries Supabase first. On error (missing table, RLS denial, network),
-// falls back to local demo store so the UI never breaks.
-// Writes: when Supabase env vars are configured, hard-fails on write error
-// instead of silently falling back to localStorage. This prevents silent data
-// loss in production. Explicit demo mode (no env vars) continues using demo
-// store unchanged. Adds: timeout, retry-on-network, friendly duplicate
-// handling, online/offline detection.
+// Live mode is fail-closed. When Supabase is configured, read/write failures
+// (network, timeout, missing table, RLS denial) are surfaced and never switch
+// to local demo data. Demo storage is available only when Supabase is explicitly
+// not configured. Adds: timeout, retry-on-network, friendly duplicate handling,
+// online/offline detection.
 import { supabase, supabaseConfigured } from "./supabase";
 import { demo } from "./demoStore";
 import { errorMessage } from "./utils";
 
 type DataError = { message?: string; code?: string };
 
-type ModeListener = (mode: "live" | "demo", lastError?: string) => void;
+type DataMode = "live" | "demo" | "error";
+type ModeListener = (mode: DataMode, lastError?: string) => void;
 const listeners = new Set<ModeListener>();
-let currentMode: "live" | "demo" | "unknown" = "unknown";
+let currentMode: DataMode | "unknown" = "unknown";
 let lastError: string | undefined;
 
-function setMode(mode: "live" | "demo", err?: string) {
+function setMode(mode: DataMode, err?: string) {
   if (mode !== currentMode || err !== lastError) {
     currentMode = mode;
     lastError = err;
@@ -88,10 +87,14 @@ export async function probeLiveMode(): Promise<boolean> {
     const { error } = await withTimeout(
       supabase.from("ols_departments").select("id", { head: true, count: "exact" }).limit(1)
     );
-    if (error) { setMode("demo", error.message); return false; }
+    if (error) {
+      setMode("error", error.message);
+      return false;
+    }
     setMode("live"); return true;
   } catch (e: unknown) {
-    setMode("demo", errorMessage(e, "Network error")); return false;
+    setMode("error", errorMessage(e, "Network error"));
+    return false;
   }
 }
 
@@ -108,7 +111,12 @@ export async function listTable<T = unknown>(table: string, opts?: { order?: str
       });
       setMode("live");
       return data;
-    } catch (e: unknown) { setMode("demo", errorMessage(e)); }
+    } catch (e: unknown) {
+      const message = errorMessage(e);
+      setMode("error", message);
+      console.error(`[ols] read ${table} failed in live mode:`, message);
+      throw new Error(`Cannot read authoritative database state: ${message}.`);
+    }
   }
   return demo.list<T>(table, opts);
 }
@@ -136,8 +144,10 @@ export async function listTableStrict<T = unknown>(
     setMode("live");
     return data;
   } catch (e: unknown) {
-    console.error(`[ols] strict read ${table} failed in live mode:`, errorMessage(e));
-    throw new Error(`Cannot read authoritative database state: ${errorMessage(e)}.`);
+    const message = errorMessage(e);
+    setMode("error", message);
+    console.error(`[ols] strict read ${table} failed in live mode:`, message);
+    throw new Error(`Cannot read authoritative database state: ${message}.`);
   }
 }
 
@@ -170,8 +180,10 @@ export async function countTable(table: string, filters?: CountFilter | CountFil
       setMode("live");
       return count;
     } catch (e: unknown) {
-      console.error(`[ols] count ${table} failed in live mode:`, errorMessage(e));
-      throw new Error(`Cannot read count from database: ${errorMessage(e)}`);
+      const message = errorMessage(e);
+      setMode("error", message);
+      console.error(`[ols] count ${table} failed in live mode:`, message);
+      throw new Error(`Cannot read count from database: ${message}`);
     }
   }
   let rows = demo.all(table);
@@ -211,8 +223,10 @@ export async function insertRow<T = unknown>(table: string, row: object): Promis
       // flipping the app-wide badge to "Demo Fallback Mode" would misrepresent
       // a blocked write as a silent fallback, which is exactly what this
       // hard-fail path exists to prevent (see file header comment above).
-      console.error(`[ols] insert ${table} failed in live mode:`, errorMessage(e));
-      throw new Error(`Cannot save to database: ${errorMessage(e)}. Check Supabase connection.`);
+      const message = errorMessage(e);
+      setMode("error", message);
+      console.error(`[ols] insert ${table} failed in live mode:`, message);
+      throw new Error(`Cannot save to database: ${message}. Check Supabase connection.`);
     }
   }
   return demo.insert(table, row) as T;
@@ -232,8 +246,10 @@ export async function updateRow<T = unknown>(table: string, id: string, patch: o
       // Live mode is configured but the write failed: hard error instead of
       // silent fallback. Deliberately do NOT call setMode("demo", ...) here —
       // see the matching comment in insertRow() above.
-      console.error(`[ols] update ${table} failed in live mode:`, errorMessage(e));
-      throw new Error(`Cannot save to database: ${errorMessage(e)}. Check Supabase connection.`);
+      const message = errorMessage(e);
+      setMode("error", message);
+      console.error(`[ols] update ${table} failed in live mode:`, message);
+      throw new Error(`Cannot save to database: ${message}. Check Supabase connection.`);
     }
   }
   return demo.update(table, id, patch) as T | undefined;
@@ -255,8 +271,10 @@ export async function invokeTraceMutation<T>(
       return data as T;
     });
   } catch (e: unknown) {
-    console.error(`[ols] RPC ${fn} failed:`, errorMessage(e));
-    throw new Error(`Trace operation rejected: ${errorMessage(e)}.`);
+    const message = errorMessage(e);
+    setMode("error", message);
+    console.error(`[ols] RPC ${fn} failed:`, message);
+    throw new Error(`Trace operation rejected: ${message}.`);
   }
 }
 

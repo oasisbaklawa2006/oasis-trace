@@ -43,7 +43,7 @@ const NAV = [
 
 export default function AppShell() {
   const [open, setOpen] = useState(false);
-  const [mode, setMode] = useState<"live" | "demo" | "unknown">("unknown");
+  const [mode, setMode] = useState<"live" | "demo" | "error" | "unknown">("unknown");
   const [, setModeError] = useState<string | undefined>();
   const [online, setOnline] = useState(true);
   const [pendingQueue, setPendingQueue] = useState(0);
@@ -138,10 +138,11 @@ export default function AppShell() {
           <div className={cn(
             "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]",
             mode === "live" ? "border-success/50 bg-success/15 text-success"
+              : mode === "error" ? "border-destructive/50 bg-destructive/15 text-destructive"
               : "border-warning/50 bg-warning/15 text-warning"
           )}>
             <CircleDot size={10} />
-            {mode === "live" ? "Live Supabase Mode" : "Demo Fallback Mode"}
+            {mode === "live" ? "Live Supabase Mode" : mode === "error" ? "Live Data Unavailable" : "Demo Mode"}
           </div>
           {session && (
             <button

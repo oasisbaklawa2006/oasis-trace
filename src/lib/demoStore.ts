@@ -1,6 +1,7 @@
-// Local in-memory + localStorage demo store. Used as a fallback when
-// Supabase is not configured OR when the requested ols_ table is missing.
-// Mirrors the shape of the Supabase migration so screens behave identically.
+// Local in-memory + localStorage demo store.
+// This store is available only when Supabase is explicitly not configured.
+// A configured live environment must never fall back here after network,
+// timeout, missing-table, or RLS failures.
 
 import { num } from "./numbering";
 
