@@ -203,6 +203,13 @@ describe("Torch runtime attestation", () => {
     expectPrivateNoStore(res);
   }
 
+  it("does not build a live manifest when the Supabase project ref cannot be derived", () => {
+    for (const url of ["https://db.example.com", "https://short.supabase.co", "not a url"]) {
+      expect(buildManifest({ VITE_SUPABASE_URL: url, VITE_SUPABASE_ANON_KEY: ANON_KEY }, process.env)).toBeNull();
+    }
+    expect(buildManifest({}, process.env)).toMatchObject({ demoMode: true, supabaseProjectRef: null });
+  });
+
   it("returns 503 for a live manifest with a null or malformed project ref", () => {
     for (const ref of [null, "", "short", "ABCDEFGHIJ0123456789", "abcdefghij012345678", "abcdefghij01234567890", "abcdefghij-123456789", 12345]) {
       expect503(liveManifest({ supabaseProjectRef: ref }));
