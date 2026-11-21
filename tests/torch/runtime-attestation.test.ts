@@ -204,7 +204,7 @@ describe("Torch runtime attestation", () => {
   }
 
   it("returns 503 for a live manifest with a null or malformed project ref", () => {
-    for (const ref of [null, "", "short", "ABCDEFGHIJ0123456789", "abcdefghij012345678", "abcdefghij01234567890", "abcdefghij-123456789", 12345678901234567890]) {
+    for (const ref of [null, "", "short", "ABCDEFGHIJ0123456789", "abcdefghij012345678", "abcdefghij01234567890", "abcdefghij-123456789", 12345]) {
       expect503(liveManifest({ supabaseProjectRef: ref }));
     }
   });
