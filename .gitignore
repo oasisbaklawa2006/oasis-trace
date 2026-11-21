@@ -25,3 +25,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Torch Bearer runtime attestation manifest (server-only, generated at build)
+.torch-attestation/
