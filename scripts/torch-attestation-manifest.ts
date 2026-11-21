@@ -4,7 +4,7 @@
 // src/lib/supabase.ts / src/lib/data.ts. The manifest is written OUTSIDE dist/
 // and public/ (ignored by git) and packaged with api/runtime-attestation.ts via
 // vercel.json `includeFiles`.
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { loadEnv, type Plugin } from "vite";
@@ -28,8 +28,10 @@ export interface TorchAttestationManifest {
 function resolveGitSha(env: NodeJS.ProcessEnv): string | null {
   const candidates: (string | undefined)[] = [env.VERCEL_GIT_COMMIT_SHA];
   try {
-    candidates.push(execSync("git rev-parse HEAD", { stdio: ["ignore", "pipe", "ignore"] }).toString());
-  } catch { /* not a git checkout */ }
+    candidates.push(execFileSync("git", ["rev-parse", "HEAD"], { stdio: ["ignore", "pipe", "ignore"] }).toString());
+  } catch {
+    // Not a git checkout (or git unavailable): fall back to VERCEL_GIT_COMMIT_SHA only.
+  }
   for (const c of candidates) {
     const v = c?.trim().toLowerCase();
     if (v && SHA_RE.test(v)) return v;
@@ -48,7 +50,9 @@ export function supabaseProjectRefFromUrl(url: string | undefined): string | nul
   try {
     const m = /^([a-z0-9-]+)\.supabase\.(co|in)$/i.exec(new URL(url).hostname);
     return m ? m[1].toLowerCase() : null;
-  } catch { return null; }
+  } catch {
+    return null; // unparseable URL
+  }
 }
 
 export function buildManifest(viteEnv: Record<string, string | undefined>, procEnv: NodeJS.ProcessEnv): TorchAttestationManifest | null {
