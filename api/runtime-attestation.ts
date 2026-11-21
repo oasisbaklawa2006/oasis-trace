@@ -35,9 +35,8 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 }
 
 function sameKeys(obj: Record<string, unknown>, expected: string[]): boolean {
-  const keys = Object.keys(obj).sort();
-  const want = [...expected].sort();
-  return keys.length === want.length && keys.every((k, i) => k === want[i]);
+  const keys = Object.keys(obj);
+  return keys.length === expected.length && expected.every((k) => keys.includes(k));
 }
 
 function loadManifest(): Record<string, unknown> | null {
