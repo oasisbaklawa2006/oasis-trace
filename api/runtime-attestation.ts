@@ -27,23 +27,38 @@ function tokenOk(provided: string | string[] | undefined, expected: string | und
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+const REF_RE = /^[a-z0-9]{20}$/;
+const FLAG_KEYS = ["centralScanSubmit", "leap13Uat"];
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function sameKeys(obj: Record<string, unknown>, expected: string[]): boolean {
+  const keys = Object.keys(obj).sort();
+  const want = [...expected].sort();
+  return keys.length === want.length && keys.every((k, i) => k === want[i]);
+}
+
 function loadManifest(): Record<string, unknown> | null {
   try {
     const file = path.join(process.cwd(), ".torch-attestation", "runtime-attestation.json");
-    const m = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
-    if (!m || typeof m !== "object" || Array.isArray(m)) return null;
-    if (Object.keys(m).sort().join() !== [...KEYS].sort().join()) return null;
-    const flags = m.activeFeatureFlags as Record<string, unknown> | null;
+    const m: unknown = JSON.parse(readFileSync(file, "utf8"));
+    if (!isPlainObject(m) || !sameKeys(m, KEYS)) return null;
+    const flags = m.activeFeatureFlags;
     if (
       m.app !== "trace" ||
       typeof m.gitSha !== "string" || !SHA_RE.test(m.gitSha) ||
-      !ENVS.includes(m.environment as string) ||
-      !(m.supabaseProjectRef === null || typeof m.supabaseProjectRef === "string") ||
+      typeof m.environment !== "string" || !ENVS.includes(m.environment) ||
       typeof m.demoMode !== "boolean" ||
-      !flags || typeof flags !== "object" || Array.isArray(flags) ||
+      !isPlainObject(flags) || !sameKeys(flags, FLAG_KEYS) ||
       !Object.values(flags).every((v) => typeof v === "boolean")
     ) return null;
-    if (m.demoMode && m.supabaseProjectRef !== null) return null;
+    if (m.demoMode) {
+      if (m.supabaseProjectRef !== null) return null;
+    } else if (typeof m.supabaseProjectRef !== "string" || !REF_RE.test(m.supabaseProjectRef)) {
+      return null;
+    }
     return m;
   } catch {
     return null;

@@ -9,6 +9,7 @@ import { buildManifest, torchAttestationManifest } from "../../scripts/torch-att
 
 const TOKEN = "test-runtime-attestation-token";
 const GIT_SHA = "0123456789abcdef0123456789abcdef01234567";
+const REF = "abcdefghij0123456789";
 const ANON_KEY = "test-anon-key-not-for-response";
 const ENV_KEYS = [
   "TORCH_ATTEST_TOKEN",
@@ -110,7 +111,7 @@ describe("Torch runtime attestation", () => {
   it("returns only the six-key live contract and excludes secrets", () => {
     process.env.VERCEL_ENV = "production";
     const manifest = buildManifest({
-      VITE_SUPABASE_URL: "https://project-ref.supabase.co",
+      VITE_SUPABASE_URL: `https://${REF}.supabase.co`,
       VITE_SUPABASE_ANON_KEY: ANON_KEY,
       VITE_CENTRAL_SCAN_SUBMIT_ENABLED: "true",
       VITE_LEAP13_UAT: "0",
@@ -134,7 +135,7 @@ describe("Torch runtime attestation", () => {
       app: "trace",
       gitSha: GIT_SHA,
       environment: "production",
-      supabaseProjectRef: "project-ref",
+      supabaseProjectRef: REF,
       activeFeatureFlags: { centralScanSubmit: true, leap13Uat: false },
       demoMode: false,
     });
@@ -174,14 +175,57 @@ describe("Torch runtime attestation", () => {
       app: "trace",
       gitSha: GIT_SHA,
       environment: "production",
-      supabaseProjectRef: "project-ref",
-      activeFeatureFlags: { centralScanSubmit: "enabled" },
+      supabaseProjectRef: REF,
+      activeFeatureFlags: { centralScanSubmit: "enabled", leap13Uat: false },
       demoMode: false,
     });
     const brokenConfig = request("GET", TOKEN);
     expect(brokenConfig.statusCode).toBe(503);
     expect(brokenConfig.body).toBe("");
     expectPrivateNoStore(brokenConfig);
+  });
+
+  const liveManifest = (overrides: Record<string, unknown> = {}) => ({
+    app: "trace",
+    gitSha: GIT_SHA,
+    environment: "production",
+    supabaseProjectRef: REF,
+    activeFeatureFlags: { centralScanSubmit: true, leap13Uat: false },
+    demoMode: false,
+    ...overrides,
+  });
+
+  function expect503(manifest: unknown) {
+    writeManifest(manifest);
+    const res = request("GET", TOKEN);
+    expect(res.statusCode).toBe(503);
+    expect(res.body).toBe("");
+    expectPrivateNoStore(res);
+  }
+
+  it("returns 503 for a live manifest with a null or malformed project ref", () => {
+    for (const ref of [null, "", "short", "ABCDEFGHIJ0123456789", "abcdefghij012345678", "abcdefghij01234567890", "abcdefghij-123456789", 12345678901234567890]) {
+      expect503(liveManifest({ supabaseProjectRef: ref }));
+    }
+  });
+
+  it("returns 200 for a bootable demo manifest and 503 when demo carries a ref", () => {
+    writeManifest(liveManifest({ supabaseProjectRef: null, demoMode: true }));
+    const res = request("GET", TOKEN);
+    expect(res.statusCode).toBe(200);
+    expectPrivateNoStore(res);
+    expect(JSON.parse(res.body)).toMatchObject({ supabaseProjectRef: null, demoMode: true });
+    expect503(liveManifest({ supabaseProjectRef: REF, demoMode: true }));
+  });
+
+  it("returns 503 when activeFeatureFlags has missing, extra, or non-boolean keys", () => {
+    expect503(liveManifest({ activeFeatureFlags: { centralScanSubmit: true } }));
+    expect503(liveManifest({ activeFeatureFlags: { leap13Uat: true } }));
+    expect503(liveManifest({ activeFeatureFlags: {} }));
+    expect503(liveManifest({ activeFeatureFlags: { centralScanSubmit: true, leap13Uat: false, extra: true } }));
+    expect503(liveManifest({ activeFeatureFlags: { centralScanSubmit: true, leap13Uat: "no" } }));
+    expect503(liveManifest({ activeFeatureFlags: [true, false] }));
+    expect503(liveManifest({ activeFeatureFlags: null }));
   });
 
   it("serves baked Vite config despite changed Function env and keeps the manifest out of static assets", () => {
@@ -194,7 +238,7 @@ describe("Torch runtime attestation", () => {
     writeFileSync(
       path.join(root, ".env.test"),
       [
-        "VITE_SUPABASE_URL=https://baked-project.supabase.co",
+        "VITE_SUPABASE_URL=https://bakedproject00000000.supabase.co",
         `VITE_SUPABASE_ANON_KEY=${ANON_KEY}`,
         "VITE_CENTRAL_SCAN_SUBMIT_ENABLED=true",
         "VITE_LEAP13_UAT=1",
@@ -212,12 +256,12 @@ describe("Torch runtime attestation", () => {
 
     const manifestPath = path.join(root, ".torch-attestation", "runtime-attestation.json");
     const bakedManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-    expect(bakedManifest.supabaseProjectRef).toBe("baked-project");
+    expect(bakedManifest.supabaseProjectRef).toBe("bakedproject00000000");
     expect(bakedManifest.activeFeatureFlags).toEqual({ centralScanSubmit: true, leap13Uat: true });
     expect(containsManifestFile(publicDirectory)).toBe(false);
     expect(containsManifestFile(distDirectory)).toBe(false);
 
-    process.env.VITE_SUPABASE_URL = "https://runtime-project.supabase.co";
+    process.env.VITE_SUPABASE_URL = "https://runtimeproject000000.supabase.co";
     process.env.VITE_SUPABASE_ANON_KEY = "runtime-secret";
     process.env.VITE_CENTRAL_SCAN_SUBMIT_ENABLED = "false";
     process.env.VITE_LEAP13_UAT = "0";
@@ -225,7 +269,7 @@ describe("Torch runtime attestation", () => {
     expect(res.statusCode).toBe(200);
     expectPrivateNoStore(res);
     const body = JSON.parse(res.body);
-    expect(body.supabaseProjectRef).toBe("baked-project");
+    expect(body.supabaseProjectRef).toBe("bakedproject00000000");
     expect(body.activeFeatureFlags).toEqual({ centralScanSubmit: true, leap13Uat: true });
     expect(res.body).not.toContain("runtime-secret");
   });
