@@ -1,9 +1,17 @@
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClient, type SupportedStorage } from "@supabase/supabase-js";
 
-const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+// `import.meta.env` is absent when this module is loaded by Node tooling
+// (the Torch attestation manifest generator), hence the fallback.
+const env = (import.meta.env ?? {}) as Record<string, string | undefined>;
+const url = env.VITE_SUPABASE_URL;
+const key = env.VITE_SUPABASE_ANON_KEY;
 
-export const supabaseConfigured = Boolean(url && key);
+/** Single source of truth for "is Supabase configured" (shared with build-time attestation). */
+export function isSupabaseConfigured(u: string | undefined, k: string | undefined): boolean {
+  return Boolean(u && k);
+}
+
+export const supabaseConfigured = isSupabaseConfigured(url, key);
 
 /**
  * Supabase singleton. If env vars are missing the build still works — pages
@@ -12,7 +20,7 @@ export const supabaseConfigured = Boolean(url && key);
  */
 export const supabase: SupabaseClient | null = supabaseConfigured
   ? createClient(url!, key!, {
-      auth: { persistSession: true, autoRefreshToken: true, storage: typeof window !== "undefined" ? window.localStorage : undefined },
+      auth: { persistSession: true, autoRefreshToken: true, storage: (globalThis as { localStorage?: SupportedStorage }).localStorage },
     })
   : null;
 

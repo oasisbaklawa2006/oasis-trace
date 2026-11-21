@@ -1,0 +1,10 @@
+{
+  "functions": {
+    "api/runtime-attestation.ts": {
+      "includeFiles": ".torch-attestation/**"
+    }
+  },
+  "rewrites": [
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ]
+}
